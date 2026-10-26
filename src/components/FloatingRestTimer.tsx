@@ -1,7 +1,6 @@
 import React from 'react';
-import { Timer, Plus, Minus, SkipForward, Volume2, Flame } from 'lucide-react';
+import { Timer, Plus, Minus, SkipForward, Flame } from 'lucide-react';
 import { formatDuration } from '../utils/fitnessUtils';
-import { playRestTimerBeep } from '../utils/deviceHardware';
 
 interface FloatingRestTimerProps {
   remainingSeconds: number;
@@ -19,25 +18,26 @@ export const FloatingRestTimer: React.FC<FloatingRestTimerProps> = ({
   isActive,
   exerciseName,
   onAdjustSeconds,
-  onSetPreset,
   onSkip,
 }) => {
   if (!isActive) return null;
 
-  const progress = totalSeconds > 0 ? Math.max(0, Math.min(100, ((totalSeconds - remainingSeconds) / totalSeconds) * 100)) : 100;
+  const progress =
+    totalSeconds > 0
+      ? Math.max(0, Math.min(100, ((totalSeconds - remainingSeconds) / totalSeconds) * 100))
+      : 100;
   const isFinished = remainingSeconds <= 0;
 
   return (
     <div
-      className="fixed left-3 right-3 md:left-auto md:right-6 md:w-[440px] bottom-safe-float z-40 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-emerald-500/40 shadow-2xl shadow-black/70 p-3.5 transition-all"
+      className="fixed left-3 right-3 md:left-auto md:right-6 md:w-96 bottom-safe-float z-40 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-slate-700/80 shadow-2xl px-3.5 py-2.5"
       role="region"
       aria-label="组间休息计时器"
     >
-      {/* Top progress bar */}
-      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mb-3">
+      <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden mb-2">
         <div
           className={`h-full transition-all duration-300 ${
-            isFinished ? 'bg-amber-400 animate-pulse' : 'bg-gradient-to-r from-emerald-500 to-cyan-400'
+            isFinished ? 'bg-amber-400' : 'bg-emerald-500'
           }`}
           style={{ width: `${progress}%` }}
         />
@@ -46,43 +46,37 @@ export const FloatingRestTimer: React.FC<FloatingRestTimerProps> = ({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <div
-            className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
               isFinished
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-bounce'
-                : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-emerald-500/15 text-emerald-400'
             }`}
           >
-            {isFinished ? <Flame className="w-6 h-6" /> : <Timer className="w-6 h-6" />}
+            {isFinished ? <Flame className="w-5 h-5" /> : <Timer className="w-5 h-5" />}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-400 truncate">
-                {isFinished ? '休息结束！准备下一组' : `组间休息 · ${exerciseName || '当前动作'}`}
-              </span>
+            <div className="text-[11px] text-slate-400 truncate">
+              {isFinished ? '休息完成 · 开始下一组' : `休息 · ${exerciseName || '当前动作'}`}
             </div>
-            <div className="text-2xl font-bold font-mono tracking-tight text-white flex items-baseline gap-2">
-              <span>{formatDuration(remainingSeconds)}</span>
-              <span className="text-xs font-normal text-slate-400">/ {formatDuration(totalSeconds)}</span>
+            <div className="text-xl font-bold font-mono text-white leading-tight">
+              {formatDuration(remainingSeconds)}
             </div>
           </div>
         </div>
 
-        {/* Quick step controls */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={() => onAdjustSeconds(-30)}
-            className="touch-target px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-semibold flex items-center gap-0.5 border border-slate-700"
-            title="减少 30 秒"
+            onClick={() => onAdjustSeconds(-15)}
+            className="touch-target px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-0.5 cursor-pointer"
           >
             <Minus className="w-3.5 h-3.5" />
-            30s
+            15s
           </button>
           <button
             type="button"
             onClick={() => onAdjustSeconds(30)}
-            className="touch-target px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-semibold flex items-center gap-0.5 border border-slate-700"
-            title="增加 30 秒"
+            className="touch-target px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-0.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             30s
@@ -90,42 +84,12 @@ export const FloatingRestTimer: React.FC<FloatingRestTimerProps> = ({
           <button
             type="button"
             onClick={onSkip}
-            className="touch-target px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs flex items-center gap-1 shadow-lg shadow-emerald-500/20"
+            className="touch-target px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1 cursor-pointer"
           >
-            <SkipForward className="w-4 h-4" />
-            {isFinished ? '好的' : '跳过'}
+            <SkipForward className="w-3.5 h-3.5" />
+            {isFinished ? '完成' : '跳过'}
           </button>
         </div>
-      </div>
-
-      {/* Preset pills & sound test */}
-      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-1.5">
-          <span className="text-slate-400">快捷时长:</span>
-          {[60, 90, 120, 180].map((sec) => (
-            <button
-              key={sec}
-              type="button"
-              onClick={() => onSetPreset(sec)}
-              className={`px-2 py-1 rounded-lg font-medium transition ${
-                totalSeconds === sec
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {sec}s
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={() => playRestTimerBeep()}
-          className="px-2 py-1 rounded-lg bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 flex items-center gap-1"
-          title="测试提示音与震动"
-        >
-          <Volume2 className="w-3.5 h-3.5" />
-          <span>试音</span>
-        </button>
       </div>
     </div>
   );
