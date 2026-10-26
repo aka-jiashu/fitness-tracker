@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import {
   Exercise,
   Routine,
+  RoutineExercise,
   WorkoutSession,
   WorkoutSet,
   BodyMetric,
@@ -15,7 +16,7 @@ import {
   INITIAL_SETS,
   INITIAL_BODY_METRICS,
 } from './seedData';
-import { estimate1RMKg } from '../utils/fitnessUtils';
+import { convertWeight, estimate1RMKg } from '../utils/fitnessUtils';
 
 export class FitnessDatabase extends Dexie {
   exercises!: Table<Exercise, string>;
@@ -38,37 +39,55 @@ export class FitnessDatabase extends Dexie {
 
 export const db = new FitnessDatabase();
 
+const SEED_VERSION_KEY = 'fitness_tracker_seed_v2_real_logs';
 let seedPromise: Promise<void> | null = null;
 
 /**
- * 初始化预置动作库、经典分化模板及初始演示记录
+ * 初始化预置动作库、专属分化模板及 35 场真实训练日志（支持从旧版 Demo 数据平滑升级）
  */
 export async function ensureDatabaseSeeded(): Promise<void> {
   if (seedPromise) return seedPromise;
   seedPromise = (async () => {
+    const isV2Seeded =
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(SEED_VERSION_KEY) === 'true';
     const count = await db.exercises.count();
-    if (count === 0) {
+
+    if (count === 0 || !isV2Seeded) {
       await db.transaction(
         'rw',
         [db.exercises, db.routines, db.workoutSessions, db.workoutSets, db.bodyMetrics],
         async () => {
+          // 清理旧版虚拟 Demo 会话与内置旧模板
+          const oldDemoSessionIds = ['session_demo_1', 'session_demo_2', 'session_demo_3', 'session_demo_4'];
+          await db.workoutSessions.bulkDelete(oldDemoSessionIds);
+          await db.workoutSets.where('sessionId').anyOf(oldDemoSessionIds).delete();
+
+          const oldBuiltinRoutineIds = [
+            'routine_ppl_push',
+            'routine_ppl_pull',
+            'routine_ppl_legs',
+            'routine_ul_upper',
+            'routine_ul_lower',
+            'routine_fullbody',
+          ];
+          await db.routines.bulkDelete(oldBuiltinRoutineIds);
+
+          // 写入最新真实动作库、5 套专属分化计划、35 场真实训练记录
           await db.exercises.bulkPut(INITIAL_EXERCISES);
           await db.routines.bulkPut(INITIAL_ROUTINES);
           await db.workoutSessions.bulkPut(INITIAL_SESSIONS);
           await db.workoutSets.bulkPut(INITIAL_SETS);
-          await db.bodyMetrics.bulkPut(INITIAL_BODY_METRICS);
+
+          const bmCount = await db.bodyMetrics.count();
+          if (bmCount === 0) {
+            await db.bodyMetrics.bulkPut(INITIAL_BODY_METRICS);
+          }
         }
       );
-    } else {
-      // 确保所有 32 个预置动作都存在（不覆盖用户已修改的 defaultUnit）
-      const existingIds = new Set(await db.exercises.toCollection().primaryKeys());
-      const missingExercises = INITIAL_EXERCISES.filter((ex) => !existingIds.has(ex.id));
-      if (missingExercises.length > 0) {
-        await db.exercises.bulkPut(missingExercises);
-      }
-      const routineCount = await db.routines.count();
-      if (routineCount === 0) {
-        await db.routines.bulkPut(INITIAL_ROUTINES);
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SEED_VERSION_KEY, 'true');
       }
     }
   })();
@@ -122,7 +141,6 @@ export async function getLastPerformanceForExercise(
 
   if (allSets.length === 0) return { sets: [] };
 
-  // 找到最近一次已完成会话
   const sessionIds = Array.from(new Set(allSets.map((s) => s.sessionId)));
   const sessions = await db.workoutSessions.bulkGet(sessionIds);
   const validSessions = sessions
@@ -140,6 +158,141 @@ export async function getLastPerformanceForExercise(
     sets: latestSets,
     lastNote: latestSession.exerciseNotes?.[exerciseId],
   };
+}
+
+/**
+ * 按指定计划模板启动新训练会话（自动继承各动作上次每组的真实重量）
+ */
+export async function startWorkoutFromRoutine(routine: Routine): Promise<string> {
+  // 先清理任何未完成的旧会话
+  const activeSessions = await db.workoutSessions.filter((s) => !s.isFinished).toArray();
+  for (const old of activeSessions) {
+    await db.workoutSets.where('sessionId').equals(old.id).delete();
+    await db.workoutSessions.delete(old.id);
+  }
+
+  const allExercises = await db.exercises.toArray();
+  const exerciseMap = new Map<string, Exercise>();
+  allExercises.forEach((e) => exerciseMap.set(e.id, e));
+
+  const sessionId = `ws_${Date.now()}`;
+  const exerciseOrder = routine.exercises.map((item) => item.exerciseId);
+  const newSets: WorkoutSet[] = [];
+
+  for (const item of routine.exercises) {
+    const ex = exerciseMap.get(item.exerciseId);
+    const unit: WeightUnit = ex?.defaultUnit || item.targetUnit || 'lb';
+    const lastPerf = await getLastPerformanceForExercise(item.exerciseId, sessionId);
+
+    for (let i = 1; i <= item.targetSets; i++) {
+      const prevSet =
+        lastPerf.sets[i - 1] || lastPerf.sets[lastPerf.sets.length - 1];
+      const defaultWeight = prevSet
+        ? convertWeight(prevSet.weight, prevSet.unit, unit)
+        : ex?.equipment === 'bodyweight' || ex?.equipment === 'band'
+        ? 0
+        : unit === 'lb'
+        ? 25
+        : 20;
+      const defaultReps = item.targetReps || (prevSet ? prevSet.reps : 12);
+
+      newSets.push({
+        id: `set_${sessionId}_${item.exerciseId}_${i}_${Math.random()
+          .toString(36)
+          .slice(2, 6)}`,
+        sessionId,
+        exerciseId: item.exerciseId,
+        setOrder: i,
+        setType: prevSet?.setType === 'warmup' && i <= 2 ? 'warmup' : 'normal',
+        weight: defaultWeight,
+        unit,
+        reps: defaultReps,
+        isCompleted: false,
+      });
+    }
+  }
+
+  const newSession: WorkoutSession = {
+    id: sessionId,
+    name: routine.name,
+    routineId: routine.id,
+    startTime: Date.now(),
+    durationSeconds: 0,
+    totalVolumeKg: 0,
+    exerciseOrder,
+    isFinished: false,
+    createdAt: Date.now(),
+  };
+
+  await db.transaction('rw', [db.workoutSessions, db.workoutSets], async () => {
+    await db.workoutSessions.put(newSession);
+    if (newSets.length > 0) await db.workoutSets.bulkPut(newSets);
+  });
+
+  return sessionId;
+}
+
+/**
+ * 检测本次训练会话的动作列表或各动作组数是否与原关联计划模板存在差异
+ */
+export function hasRoutineDiff(
+  session: WorkoutSession,
+  sets: WorkoutSet[],
+  routine?: Routine
+): boolean {
+  if (!routine) return false;
+  if (session.exerciseOrder.length !== routine.exercises.length) return true;
+
+  for (let i = 0; i < session.exerciseOrder.length; i++) {
+    const exId = session.exerciseOrder[i];
+    const rEx = routine.exercises[i];
+    if (!rEx || rEx.exerciseId !== exId) return true;
+
+    const exSets = sets.filter((s) => s.exerciseId === exId && !s.isSkipped);
+    const completedSets = exSets.filter((s) => s.isCompleted);
+    const effectiveCount = completedSets.length > 0 ? completedSets.length : exSets.length;
+    if (effectiveCount > 0 && effectiveCount !== rEx.targetSets) return true;
+  }
+
+  return false;
+}
+
+/**
+ * 将本次训练会话的动作顺序与组数同步回原计划模板
+ */
+export async function syncSessionToRoutine(
+  session: WorkoutSession,
+  sets: WorkoutSet[],
+  routine: Routine
+): Promise<void> {
+  const existingMap = new Map<string, RoutineExercise>();
+  routine.exercises.forEach((item) => existingMap.set(item.exerciseId, item));
+
+  const nextExercises: RoutineExercise[] = [];
+  for (const exId of session.exerciseOrder) {
+    const exSets = sets
+      .filter((s) => s.exerciseId === exId && !s.isSkipped)
+      .sort((a, b) => a.setOrder - b.setOrder);
+    const completedSets = exSets.filter((s) => s.isCompleted);
+    const activeSets = completedSets.length > 0 ? completedSets : exSets;
+    if (activeSets.length === 0) continue;
+
+    const prev = existingMap.get(exId);
+    const refSet = activeSets[activeSets.length - 1];
+
+    nextExercises.push({
+      exerciseId: exId,
+      targetSets: activeSets.length,
+      targetReps: refSet.reps || prev?.targetReps || 12,
+      targetUnit: refSet.unit || prev?.targetUnit || 'lb',
+      restSeconds: prev?.restSeconds || 90,
+      notes: session.exerciseNotes?.[exId] || prev?.notes,
+    });
+  }
+
+  if (nextExercises.length > 0) {
+    await db.routines.update(routine.id, { exercises: nextExercises });
+  }
 }
 
 /**
@@ -169,7 +322,7 @@ export async function exportFullBackupJson(): Promise<BackupPayload> {
 }
 
 /**
- * 导入恢复 JSON 备份数据（支持 merge 合并或 replace 全量覆盖）
+ * 导入恢复 JSON 备份数据
  */
 export async function importBackupJson(
   payload: BackupPayload,
@@ -210,7 +363,7 @@ export async function importBackupJson(
 }
 
 /**
- * 重置为出厂预置数据（带二次确认保护）
+ * 重置为出厂预置数据（恢复 35 场真实训练日志与 5 套专属计划）
  */
 export async function resetToFactoryDefaults(): Promise<void> {
   await db.transaction(
@@ -231,4 +384,7 @@ export async function resetToFactoryDefaults(): Promise<void> {
       await db.bodyMetrics.bulkPut(INITIAL_BODY_METRICS);
     }
   );
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(SEED_VERSION_KEY, 'true');
+  }
 }

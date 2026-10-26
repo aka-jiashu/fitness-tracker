@@ -1,23 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Dumbbell, BookOpen, Activity, Flame } from 'lucide-react';
+import { Dumbbell, Calendar, BookOpen, Activity, Flame } from 'lucide-react';
 import { db, ensureDatabaseSeeded } from './db/database';
 import { ActiveWorkoutTab } from './components/ActiveWorkoutTab';
+import { RoutinesTab } from './components/RoutinesTab';
 import { AnalyticsTab } from './components/AnalyticsTab';
 import { ExerciseLibraryTab } from './components/ExerciseLibraryTab';
 import { FloatingRestTimer } from './components/FloatingRestTimer';
 import { playRestTimerBeep } from './utils/deviceHardware';
 
-type TabKey = 'workout' | 'library' | 'analytics';
+type TabKey = 'workout' | 'routines' | 'library' | 'analytics';
 
 const NAV_TABS: Array<{
   key: TabKey;
   label: string;
+  shortLabel: string;
   icon: React.FC<{ className?: string }>;
 }> = [
-  { key: 'workout', label: '训练打卡', icon: Dumbbell },
-  { key: 'library', label: '动作库', icon: BookOpen },
-  { key: 'analytics', label: '记录与趋势', icon: Activity },
+  { key: 'workout', label: '训练', shortLabel: '训练', icon: Dumbbell },
+  { key: 'routines', label: '计划', shortLabel: '计划', icon: Calendar },
+  { key: 'library', label: '动作库', shortLabel: '动作库', icon: BookOpen },
+  { key: 'analytics', label: '记录与趋势', shortLabel: '记录', icon: Activity },
 ];
 
 export const App: React.FC = () => {
@@ -54,12 +57,15 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [restTimerActive, restRemainingSec]);
 
-  const handleStartRestTimer = useCallback((seconds: number, exerciseName: string) => {
-    setRestTotalSec(seconds);
-    setRestRemainingSec(seconds);
-    setRestExerciseName(exerciseName);
-    setRestTimerActive(true);
-  }, []);
+  const handleStartRestTimer = useCallback(
+    (seconds: number, exerciseName: string) => {
+      setRestTotalSec(seconds);
+      setRestRemainingSec(seconds);
+      setRestExerciseName(exerciseName);
+      setRestTimerActive(true);
+    },
+    []
+  );
 
   const handleAdjustRestSeconds = useCallback((delta: number) => {
     setRestRemainingSec((prev) => Math.max(0, prev + delta));
@@ -78,7 +84,9 @@ export const App: React.FC = () => {
   if (!dbReady) {
     return (
       <div className="min-h-dvh bg-[#090d16] text-slate-100 flex items-center justify-center p-6">
-        <div className="text-sm font-bold text-slate-400">正在加载本地训练数据...</div>
+        <div className="text-sm font-bold text-slate-400">
+          正在加载本地训练数据...
+        </div>
       </div>
     );
   }
@@ -97,7 +105,7 @@ export const App: React.FC = () => {
             </span>
           </div>
 
-          {/* Desktop / iPad Segmented Navigation */}
+          {/* Desktop / iPad 4-Tab Segmented Navigation */}
           <nav className="hidden md:flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
             {NAV_TABS.map((tab) => {
               const Icon = tab.icon;
@@ -144,7 +152,13 @@ export const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-3.5 sm:px-6 pt-4 pb-tabbar-safe">
         {activeTab === 'workout' && (
-          <ActiveWorkoutTab onStartRestTimer={handleStartRestTimer} />
+          <ActiveWorkoutTab
+            onStartRestTimer={handleStartRestTimer}
+            onNavigateToRoutines={() => setActiveTab('routines')}
+          />
+        )}
+        {activeTab === 'routines' && (
+          <RoutinesTab onWorkoutStarted={() => setActiveTab('workout')} />
         )}
         {activeTab === 'library' && <ExerciseLibraryTab />}
         {activeTab === 'analytics' && <AnalyticsTab />}
@@ -161,12 +175,12 @@ export const App: React.FC = () => {
         onSkip={handleSkipRest}
       />
 
-      {/* iPhone Bottom 3-Tab Bar */}
+      {/* iPhone Bottom 4-Tab Bar */}
       <nav
         aria-label="底部导航"
         className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#090d16]/95 backdrop-blur-md border-t border-slate-800/90 pb-safe"
       >
-        <div className="grid grid-cols-3 h-14 px-2">
+        <div className="grid grid-cols-4 h-14 px-1">
           {NAV_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -180,9 +194,11 @@ export const App: React.FC = () => {
                 }`}
               >
                 <Icon className="w-5 h-5" />
-                <span className="text-[11px] leading-none">{tab.label}</span>
+                <span className="text-[11px] leading-none">
+                  {tab.shortLabel}
+                </span>
                 {tab.key === 'workout' && hasActiveWorkout && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 absolute top-2 right-8 animate-ping" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 absolute top-2 right-6 animate-ping" />
                 )}
               </button>
             );

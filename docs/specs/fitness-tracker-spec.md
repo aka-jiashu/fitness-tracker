@@ -1,425 +1,255 @@
-# 个人健身与健康管理系统 (Fitness Tracker) - 综合设计与技术规范 (Specification)
+# 个人健身与健康管理系统 (Fitness Tracker) - 极简版综合设计与技术规范 (Specification v2.0)
 
-> **版本**：v1.0.0  
-> **状态**：设计完成 / 待评审  
-> **定位**：离线优先、单手机房友好、iPad 深度适配的个人健身与健康管理 PWA 应用。
+> **版本**：v2.0.0  
+> **状态**：待评审 (Brainstorming 共识版)  
+> **定位**：极致简洁、离线优先、单手大触控友好、iPad 分栏适配的个人力量训练与健康追踪 PWA。
 
 ---
 
 ## 目录
-1. [产品定位与核心价值](#1-产品定位与核心价值)
-2. [技术选型与架构演进方案 (Approaches)](#2-技术选型与架构演进方案-approaches)
-3. [端到端用户使用流程 (User Journeys)](#3-端到端用户使用流程-user-journeys)
-4. [5 大核心模块与界面交互规范 (UI/UX Specification)](#4-5-大核心模块与界面交互规范-uiux-specification)
-5. [离线数据模型与 TypeScript 实体定义 (Data Models)](#5-离线数据模型与-typescript-实体定义-data-models)
-6. [预置动作库规范 (30+ 核心动作清单)](#6-预置动作库规范-30-核心动作清单)
-7. [核心计算算法与业务逻辑 (Algorithms & Logic)](#7-核心计算算法与业务逻辑-algorithms--logic)
-8. [PWA、防息屏与数据导入导出方案](#8-pwa防息屏与数据导入导出方案)
+1. [设计意图与重构背景 (Intent & Why)](#1-设计意图与重构背景-intent--why)
+2. [目标、非目标与反目标 (Goals, Non-Goals & Anti-Goals)](#2-目标非目标与反目标-goals-non-goals--anti-goals)
+3. [技术架构与实现方案对比 (Approaches)](#3-技术架构与实现方案对比-approaches)
+4. [全局导航与 4-Tab 信息架构](#4-全局导航与-4-tab-信息架构)
+5. [四大核心模块交互与功能规范](#5-四大核心模块交互与功能规范)
+   - [5.1 Tab 1：训练 (Active Workout)](#51-tab-1训练-active-workout)
+   - [5.2 Tab 2：计划 (Routines & Inline Editor)](#52-tab-2计划-routines--inline-editor)
+   - [5.3 Tab 3：动作库 (Exercise Library)](#53-tab-3动作库-exercise-library)
+   - [5.4 Tab 4：记录与趋势 (History, Trends & Backup)](#54-tab-4记录与趋势-history-trends--backup)
+6. [数据模型与 Dexie.js 存储契约](#6-数据模型与-dexiejs-存储契约)
+7. [关键业务算法与联动逻辑](#7-关键业务算法与联动逻辑)
+8. [Modern Web Guidance 现代 Web 规范落地清单](#8-modern-web-guidance-现代-web-规范落地清单)
+9. [留给实现者的工程细节决策 (Left to the Builder)](#9-留给实现者的工程细节决策-left-to-the-builder)
 
 ---
 
-## 1. 产品定位与核心价值
+## 1. 设计意图与重构背景 (Intent & Why)
 
-### 1.1 背景与痛点
-健身房力量训练与日常健康打卡具有鲜明的场景特性：
-1. **网络恶劣**：很多健身房位于商场地下一层或信号屏蔽严重区域，传统云端 App 常因网络阻塞导致卡顿甚至组数丢失。
-2. **操作窗口短且手忙脚乱**：大重量间歇心率极高、手汗多，传统键盘输入或微小输入框体验极差。
-3. **器械配重与单位混杂**：同一健身房内，自由重量（哑铃）通常为英磅（lb），大型力量器械（固定器械、腿举机）多为公斤（kg），传统软件强制单一单位导致频繁人工换算。
-4. **数据归属与隐私**：健身打卡与身材体征数据属于极具隐私的个人健康数据，用户期望数据完全由自己掌控。
+在健身房高心率、手汗多、信号弱的真实训练场景下，用户点开手机的核心诉求只有两个：**「看清今天练什么并立刻开练」** 和 **「用最少点击完成每一组的重量/次数打卡」**。
 
-### 1.2 核心价值主张
-* **零延迟离线优先**：基于浏览器原生 IndexedDB (Dexie.js)，秒开、秒记录，100% 离线可用。
-* **单手大触控交互**：针对 iPhone 单手大拇指下半区设计大按键与快速步进器（±2.5kg / ±5lb）。
-* **单位独立记忆**：按动作独立记忆首选单位（kg/lb），自由切换无损存储。
-* **深度适配多端设备**：iPhone 采用沉浸式 TabBar，iPad 采用横竖屏 Master-Detail 分栏视图。
-* **纯结构化计划流**：计划态（预设模板）与完成态（实际执行）解耦，支持自由划掉跳过、加组与随手感悟便签。
+* **v1.0 的痛点**：采用 5-Tab 架构，页面内堆砌了过多顶部统计横幅、复杂的周期排班表、RPE 疲劳度滑块、多维身体围度大表单及多张图表，导致移动端视觉拥挤、操作层级深。
+* **v2.0 的核心演进**：对标 Strong / Hevy 等行业标杆，确立 **「清爽 4-Tab + 手风琴原地展开微调 + 渐进超负荷自动带出重量 + 结课反向同步模板」** 的极简工作流，砍掉一切非核心视觉噪音，让每个页面在一屏之内聚焦单一核心任务。
 
 ---
 
-## 2. 技术选型与架构演进方案 (Approaches)
+## 2. 目标、非目标与反目标 (Goals, Non-Goals & Anti-Goals)
 
-在架构设计阶段，团队评估了以下两条技术演进路线：
+### 2.1 核心目标 (Goals)
+1. **清晰的 4-Tab 职责划分**：`训练`（专注当下流汗打卡）、`计划`（模板管理与原地展开微调）、`动作库`（检索动作与要领）、`记录与趋势`（容量/体重趋势图、历史日志与 JSON 备份）。
+2. **计划模板原地展开微调 + 一键开练**：支持用户自定义新建计划，点击任意计划卡片即可原地展开，通过 `+/-` 步进器实时微调每个动作的「目标组数 × 目标次数 × 休息秒数」、调整动作顺序、增删动作及绑定推荐星期几，无需跳转多层弹窗或手动点保存。
+3. **训练与计划的双向丝滑联动**：
+   - **正向启动**：按模板开练时，组数与目标次数来自模板，而**重量自动继承该动作上一次完成的真实重量**（按动作记忆的 `kg/lb` 单位无损转换）。
+   - **反向同步**：训练途中若临时增删了动作或组数，点击「完成训练」时自动检测结构差异，提供勾选框一键将最新结构更新回原计划模板。
+4. **单手大触控与多端响应式**：按钮触控热区 ≥ 44px；iPhone 采用底部 4-Tab 栏，iPad/桌面端采用顶部导航 + 训练页左右 Master-Detail 分栏。
 
-### 方案 A：离线优先 PWA 纯前端方案（已采纳）
-* **核心栈**：`React 19` + `TypeScript` + `Vite` + `Tailwind CSS` + `Dexie.js` + `Recharts` + `Lucide React`
-* **权衡与取舍**：
-  * **优势**：离线可用，在健身房无信号环境下体验无懈可击；零服务器维护成本与隐私风险；配合 iOS Safari PWA 可实现无地址栏的原生应用体验。
-  * **取舍**：多设备同步初期依赖标准的 JSON 导出 / 导入快照备份。
-* **采纳原因**：深度契合单人健身记录场景下“极致流畅、离线优先”的第一诉求。
+### 2.2 非目标 (Non-Goals)
+1. 不做云端账号体系或多人社交动态，保持 100% 本地 IndexedDB 存储 + JSON 导入导出。
+2. 不在计划模板中硬编码固定目标重量（重量由历史成绩动态驱动）。
+3. 不做复杂的全身 7 部位围度（胸/腰/臀/左右臂/左右腿）录入表单，体征仅聚焦「体重 (kg) + 体脂率 (% 可选)」。
 
-### 方案 B：全栈服务端同构方案（Next.js + 关系型数据库）
-* **核心栈**：`Next.js (App Router)` + `Prisma/PostgreSQL` (或 Supabase)
-* **权衡与取舍**：
-  * **优势**：天然支持多设备（手机、平板、电脑）实时自动同步。
-  * **劣势**：弱网/断网环境下需编写复杂的本地缓存与双向冲突合并逻辑，且需要维护后端云服务器。
-* **结论**：增加不必要的运维成本与网络延迟，故舍弃。
+### 2.3 反目标 / 禁区 (Anti-Goals)
+1. **严禁卡片内多层嵌套滚动条与冗余横幅**：任何 Tab 首屏不得出现超过 1 个以上的说明性横幅。
+2. **严禁跟练行内堆砌次要控件**：组记录行内不放 RPE 滑块、不放单组备注输入框，确保在 375px 宽度下组号、重量步进器、次数步进器与完成勾选按钮宽敞清晰。
+3. **严禁未确认的数据丢失**：删除自定义计划、删除自定义动作、放弃进行中训练、删除历史记录或重置出厂数据，均须经过二次确认。
 
 ---
 
-## 3. 端到端用户使用流程 (User Journeys)
+## 3. 技术架构与实现方案对比 (Approaches)
+
+### 采纳方案：方案 1 —— 基于 Dexie `useLiveQuery` 的响应式直写架构 + 原生 HTML/CSS 现代交互
+* **机制说明**：
+  1. **计划原地微调直写 IndexedDB**：在 `RoutinesTab` 展开某张计划卡片后，用户点击 `+/-` 修改目标组数、次数、休息时长、修改计划名称、绑定星期几或上下移动动作时，直接调用 `db.routines.update(routine.id, ...)`。利用 `dexie-react-hooks` 的 `useLiveQuery` 毫秒级自动更新视图，零草稿态同步成本。
+  2. **结课结构差异检测 (Routine Diff Detection)**：在 `ActiveWorkoutTab` 弹出完成训练 `<dialog>` 时，对比本次会话实际执行的动作列表（`exerciseOrder`）及每个动作的组数，与原关联 `Routine.exercises` 是否存在差异（动作增删、顺序变化、或某动作组数变化）。若存在差异，在结算弹窗显示勾选框：`[x] 将本次动作与组数变更同步更新到「{routine.name}」模板`。
+  3. **原生 `<dialog>` 与 CSS `calc-size()`**：所有弹窗（选择动作、新建计划、完成训练）均采用 `<dialog closedby="any">`，手风琴展开统一采用 CSS `interpolate-size: allow-keywords` 与 `calc-size(auto, size)`。
+
+### 备选方案（已放弃）：方案 2 —— 本地表单草稿态 (Draft State) + 手动保存事务
+* **放弃原因**：在移动端展开卡片微调几项参数后，用户极易直接切换底部 Tab 或直接点击「一键开练」，要求手动点击“保存修改”不仅多一步操作，还容易造成未保存状态丢失。
+
+---
+
+## 4. 全局导航与 4-Tab 信息架构
 
 ```mermaid
-flowchart TD
-    A[启动应用 / 首页] --> B{选择训练模式}
-    B -->|计划开练| C[选择分化计划: 如推日/拉日/腿日]
-    B -->|自由开练| D[空白训练会话 / 自由添加动作]
-    C --> E[生成当日训练清单: 自动带出上次成绩]
-    D --> E
-    E --> F[开始训练: 启动持续时间计时 & 激活防息屏 WakeLock]
-    F --> G[执行动作: 调整重量与次数]
-    G --> H[点击完成该组 Checkbox]
-    H --> I[自动触发组间休息倒计时: Web Audio 提示音 & 震动]
-    I -->|休息结束或手动跳过| J{是否还有更多组/动作?}
-    J -->|是: 加组/下一动作/跳过未做| G
-    J -->|否: 训练完毕| K[点击完成训练]
-    K --> L[录入整体训练感受便签]
-    L --> M[自动核算总容量、PR 刷新判断 & 写入 IndexedDB]
-    M --> N[训练复盘看板: 展示容量对比与肌群热力]
+flowchart LR
+    App["铁馆日志 App Shell"] --> T1["Tab 1: 训练 (ActiveWorkoutTab)"]
+    App --> T2["Tab 2: 计划 (RoutinesTab)"]
+    App --> T3["Tab 3: 动作库 (ExerciseLibraryTab)"]
+    App --> T4["Tab 4: 记录与趋势 (AnalyticsTab)"]
+    App --> Timer["全局底部紧凑浮层: 组间休息计时器 (FloatingRestTimer)"]
 ```
 
-### 详细步骤说明：
-1. **入场开练**：用户到达健身房，打开 PWA。在「今日训练」点击“按计划开练”（如周一腿日）。系统从预设模版实例化出今日待办清单，每个动作下方灰色淡色字体显示“上周成绩：35lb × 12次”。屏幕常亮机制开启。
-2. **组数记录**：
-   - 第一组做完，用户在输入框确认或点击快速步进按钮（如 `+5lb`）调整重量，点击绿色勾选。
-   - 系统立刻弹出悬浮倒计时（默认 90s），屏幕保持常亮。用户可在此期间放下手机喝水调整。
-3. **休息结束提醒**：倒计时归零，手机发出清脆的轻提示音并配合设备触觉震动，提醒进行下一组。
-4. **动态调整**：遇到器械被占或体力不足，用户轻按动作右上角可“替换动作”或将预定组标记为“（跳过未做）”。
-5. **结课保存**：完成训练后，系统汇总“本次总容量：8,450 kg”、“新突破 PR 动作：哑铃卧推 50lb”，生成本次训练总结并即时同步到日历与肌群分析。
+| Tab 序号 | 名称 | 图标 (`lucide-react`) | 核心职责 |
+| :--- | :--- | :--- | :--- |
+| **Tab 1** | **训练** | `Dumbbell` | 未开练时展示「今日推荐计划 + 自由训练」；开练后展示实时计时、动作卡片、重量/次数大步进器与完成打勾。 |
+| **Tab 2** | **计划** | `Calendar` | 展示所有训练计划模板；支持「+ 新建计划」、点击卡片原地展开微调（组数/次数/休息/排序/星期绑定）及「一键开练」。 |
+| **Tab 3** | **动作库** | `BookOpen` | 搜索 + 肌群筛选；切换动作默认单位 (`KG/LB`)；点击卡片展开查看动作步骤与提示；支持新增/删除自定义动作。 |
+| **Tab 4** | **记录与趋势** | `Activity` | 顶部 3 项核心汇总指标；「训练容量 / 体重走势」二合一可切换趋势图 + 快速记体重；可折叠历史训练日志；JSON 导入/导出与重置。 |
+
+* **导航栏交互表现**：
+  - **iPhone (< 768px)**：底部固定 `grid-cols-4` 导航栏（高 56px + `env(safe-area-inset-bottom)`）；当存在进行中的训练且用户切到其他 Tab 时，「训练」Tab 图标右上角显示绿色呼吸圆点，顶部栏右侧显示「训练中」快捷返回胶囊。
+  - **iPad / Desktop (≥ 768px)**：顶部栏右侧内嵌 4 个分段导航按钮，底部不显示移动端 TabBar。
 
 ---
 
-## 4. 5 大核心模块与界面交互规范 (UI/UX Specification)
+## 5. 四大核心模块交互与功能规范
 
-### 4.1 全局视口与设备响应式规范
-* **iPhone (375px - 430px)**：
-  - 采用固定底部 TabBar（高 64px + `env(safe-area-inset-bottom)`），确保大拇指触手可及。
-  - 核心操作按钮高度统一 ≥ 48px，数字输入支持专用大字号微调面板。
-* **iPad (768px - 1366px，横屏 / 竖屏)**：
-  - 采用 **Master-Detail（主从分栏）** 布局：
-    - 左侧栏（宽 360px）：当前训练动作列表、完成进度环、总时长。
-    - 右侧主区：当前动作的超大记分组数表、上次成绩折线、动作标准姿态图解与要领提醒、大屏组间休息倒计时。
+### 5.1 Tab 1：训练 (`ActiveWorkoutTab.tsx`)
 
-### 4.2 模块 1：今日训练 (Active Workout)
-* **顶部状态栏**：训练进行中常驻（总耗时时钟、总负荷容量累加、防息屏状态指示器）。
-* **动作卡片组 (Exercise Cards)**：
-  - 动作名称 + 主肌群徽章 + 默认单位切换按钮（`kg` / `lb`）。
-  - 组记录表格列定义：
-    1. 组号（1, 2, 3... 支持标记 W 热身组、D 递减组、F 力竭组）。
-    2. 上次成绩（参考列，例如 `40lb × 12`）。
-    3. 重量输入框（大按键步进：`-5` `-2.5` `+2.5` `+5`）。
-    4. 次数输入框（步进：`-1` `+1`）。
-    5. 完成打勾（点击后触发计时，并变为亮绿色）。
-    6. 更多操作（删除本组、标记跳过未做）。
-  - 动作卡片底部：`+ 添加一组`、`动作便签随手记（如：变轻松了呢！）`。
-* **组间休息计时浮层 (Floating Rest Timer)**：
-  - 悬浮在底部安全区上方，支持 `+30s`、`-30s`、`跳过`。支持预设 60s/90s/120s/180s。
+#### 状态 A：当前无进行中训练（未开练启动台）
+1. **今日推荐计划卡片（置顶高亮）**：
+   - **匹配逻辑**：获取当前本地星期几 `new Date().getDay()`（0~6）。优先查找 `routine.dayOfWeek === today` 的计划；若匹配到多个则全部列出，若无匹配则展示排在第一位的计划（并标注「常用推荐」）。
+   - **展示内容**：计划名称、星期标签（如「周一推荐」）、包含的动作胶囊列表。
+   - **操作按钮**：醒目的绿色主按钮 **「按此计划开练」** + 次要文字按钮 **「去计划页微调 / 全部模板 ->」**（点击切换至 Tab 2 `routines`）。
+2. **空白自由训练入口**：
+   - 提供独立卡片或通栏次要按钮 **「+ 开始空白自由训练」**（适合临时起意不按固定模板练的场景）。
+3. **其他计划快捷列表**：
+   - 在今日推荐下方，以简洁的 2 列网格展示其余计划模板卡片，每张卡片均可一键点击 **「开练」**。
 
-### 4.3 模块 2：计划排期与分化 (Routines & Schedules)
-* **分化训练方案管理**：
-  - 预设经典分化模板（推拉腿 PPL、上下肢 Upper/Lower、胸背/腿/肩臂经典三分化、全身综合）。
-  - 支持用户新建周期化计划，自由编排每周 7 天的训练日（如：周一推、周二拉、周三休息、周四腿...）。
-* **计划日历 (Workout Calendar)**：
-  - 月视图与周视图切换，已完成训练日显示高亮绿色实心圆，点击可回溯查看过往日志详情。
-
-### 4.4 模块 3：肌群分析与历史 (Analytics & Muscles)
-* **人体肌群热力与疲劳度模拟**：
-  - 人体正面/背面矢量解剖图：根据最近 48~72 小时内的训练容量，动态以“疲劳（红色）- 恢复中（黄色）- 完全恢复（绿色）”区分肌群状态。
-* **容量与 1RM 渐进超负荷趋势图 (Recharts)**：
-  - 支持按动作筛选（如“哑铃卧推”），绘制近 3 个月估算 1RM 与总训练容量折线图。
-  - 显示历史最好成绩榜（PR 荣誉墙）。
-
-### 4.5 模块 4：动作指导百科 (Exercise Library)
-* **分类与过滤引擎**：
-  - 按肌群过滤（胸、背、腿、肩、肱二头、肱三头、核心、全身）。
-  - 按器械过滤（哑铃、杠铃、器械、绳索、自重/弹力带）。
-* **动作详情面板**：
-  - 动作基本信息：标准中文名、英文名、主要发力肌、协同发力肌、器械类型。
-  - 标准示范：SVG/轻量动图演示、分步发力要领。
-  - 避坑警示：常见代偿错误（如“避免耸肩借力”、“手腕保持中立”）。
-  - 个人配置：该动作默认采用的重量单位（kg / lb）。
-
-### 4.6 模块 5：个人体征与数据备份 (Settings & Metrics)
-* **身体维度与体重日志**：
-  - 录入日期、体重 (kg)、体脂率 (%)、胸围、左右臂围、腰围、臀围、大腿围。
-  - 身体关键指标走势折线图。
-* **数据安全与备份中心**：
-  - 一键导出 JSON（包含所有动作、计划、历史训练日志与身体数据）。
-  - 一键导入恢复 JSON（具备数据校验与版本合并机制）。
-  - 本地快照重置/清空测试数据。
+#### 状态 B：当前有进行中训练（跟练打勾面板）
+1. **顶部紧凑状态栏**：
+   - 左侧：当前训练名称（如「推拉腿 - 推日」），下方单行等宽字体展示：`用时 MM:SS · 完成 X/Y 组 · 容量 ZZZ kg`。
+   - 右侧 3 个按钮：**「+ 加动作」**、**「完成训练」**（主色）、**「放弃训练（垃圾桶图标，带 confirm 二次确认）」**。
+2. **响应式布局（iPhone vs iPad）**：
+   - **iPhone (< 768px)**：所有动作卡片自上而下垂直排列。
+   - **iPad / 桌面 (≥ 768px)**：采用 `12 列` **Master-Detail 主从分栏**：
+     - 左侧栏（`col-span-4`）：当前训练动作目录列表（显示序号、动作名、`已完成组/总组数`），点击切换当前聚焦动作。
+     - 右侧栏（`col-span-8`）：当前选中动作的跟练详情卡片。
+3. **单个动作跟练卡片结构**：
+   - **卡片头部**：
+     - 左侧：动作名称 + `主肌群 · 器械` 徽章；次行淡色小字显示**上次成绩参考**（如：`上次: 60kg×10, 60kg×10, 62.5kg×8`；若上次有动作便签则一并同行提示 `📝 座椅 4 档`）。
+     - 右侧工具按钮组：
+       1. **单位切换按钮 (`KG` / `LB`)**：点击立即切换该动作的 `defaultUnit`，并将当前未完成组的重量按精度（`0.5`）自动换算。
+       2. **动作便签开关按钮（`StickyNote` 图标）**：点击展开/收起一行轻量的单动作备注输入框（实时保存在 `currentSession.exerciseNotes[exerciseId]` 中，下次练该动作时自动展示）。
+       3. **移除动作按钮（`Trash2` 图标）**：从本次训练中移除该动作及其组数据（若已有完成组则 `confirm` 确认）。
+   - **组记录行（Set Row）**：
+     - **组类型按钮**：固定宽高 `32×32px` 徽章，普通组显示组序号 `1, 2, 3...`，点击循环切换 `normal (N)` -> `warmup (W 热身)` -> `drop (D 递减)` -> `failure (F 力竭)`；若该组打破历史最高估算 1RM，右侧紧跟金色 `PR` 徽章。
+     - **重量步进区**：`[-] (40×40px)` + `数字输入框（带单位下标）` + `[+] (40×40px)`。步进幅度：`kg` 模式下每次 `±2.5kg`，`lb` 模式下每次 `±5lb`（自重动作默认重量为 `0`，仍允许录入负重）。
+     - **次数步进区**：`[-] (40×40px)` + `数字输入框（次）` + `[+] (40×40px)`，步进幅度 `±1`。
+     - **完成打勾按钮**：点击切换完成态（亮绿色背景），勾选瞬间播放轻快提示音、校验是否破 PR（破 PR 触发轻量彩带），并**自动按该动作预设休息秒数（若来自计划模板则取 `RoutineExercise.restSeconds`，否则默认 `90s`）启动底部休息计时器**。
+     - **删除单组按钮**：右侧轻量删除图标。
+   - **卡片底部**：通栏虚线按钮 **`+ 加一组`**（新组默认复制上一组的重量、次数与单位）。
+4. **完成训练结算弹窗 (`<dialog closedby="any">`)**：
+   - 展示本次汇总：总用时、完成组数、总容量 (kg)。
+   - **智能模板同步复选框（条件渲染）**：若本次会话关联了 `routineId` 且原计划依然存在，对比发现本次会话的动作列表或各动作组数与原计划不一致时，显示勾选框（默认勾选 `true`）：
+     - `☑ 将本次动作与组数变更同步更新回计划模板「{routine.name}」`
+     - 若勾选，保存训练时同步更新 `Routine.exercises`（新增动作默认取本次完成的组数、中位/首组次数及 90s 休息时长；原有动作更新 `targetSets` 为本次该动作的总组数）。
+   - **整体训练感受输入框**：可选填今日总结备注。
 
 ---
 
-## 5. 离线数据模型与 TypeScript 实体定义 (Data Models)
+### 5.2 Tab 2：计划 (`RoutinesTab.tsx` —— 模板管理与原地展开微调)
 
-```typescript
-// ==================== 1. 基础枚举与公用类型 ====================
-export type MuscleGroup = 
-  | 'chest'      // 胸部
-  | 'back'       // 背部
-  | 'legs'       // 腿部 (股四头/股二头/小腿)
-  | 'shoulders'  // 肩部 (前束/中束/后束)
-  | 'arms'       // 手臂 (二头/三头)
-  | 'core'       // 核心/腹部
-  | 'cardio'     // 有氧/全身
-  | 'other';
-
-export type EquipmentType = 
-  | 'barbell'    // 杠铃
-  | 'dumbbell'   // 哑铃
-  | 'machine'    // 固定器械
-  | 'cable'      // 绳索滑轮
-  | 'bodyweight' // 自重/无负重
-  | 'band'       // 弹力带
-  | 'other';
-
-export type WeightUnit = 'kg' | 'lb';
-
-export type SetType = 'warmup' | 'normal' | 'drop' | 'failure';
-
-// ==================== 2. 动作字典表 (Exercise) ====================
-export interface Exercise {
-  id: string;                     // 唯一标识 (如 'ex_db_bench_press')
-  name: string;                   // 动作名称 (如 '哑铃卧推')
-  nameEn?: string;                // 英文名称
-  primaryMuscle: MuscleGroup;     // 主要目标肌群
-  secondaryMuscles?: MuscleGroup[]; // 辅助肌群
-  equipment: EquipmentType;       // 器械类型
-  defaultUnit: WeightUnit;        // 默认单位记忆 ('kg' | 'lb')
-  isCustom: boolean;              // 是否为用户自定义动作
-  instructions: string[];         // 动作要领步骤
-  tips?: string[];                // 常见易错警示
-  mediaPlaceholder?: string;      // 演示图或矢量动图路径
-  createdAt: number;
-}
-
-// ==================== 3. 训练计划与模板 (Routine) ====================
-export interface RoutineExercise {
-  exerciseId: string;
-  targetSets: number;             // 预设目标组数 (如 4)
-  targetReps: number;             // 预设目标次数 (如 12)
-  targetUnit: WeightUnit;
-  restSeconds: number;            // 推荐休息时长 (如 90)
-  notes?: string;                 // 备注要求
-}
-
-export interface Routine {
-  id: string;
-  name: string;                   // 计划名称 (如 '推拉腿 - 腿日')
-  description?: string;
-  splitType: 'PPL' | 'UpperLower' | 'Split4' | 'FullBody' | 'Custom';
-  dayOfWeek?: number;             // 推荐周期：0 (周日) ~ 6 (周六)
-  exercises: RoutineExercise[];
-  isBuiltin: boolean;
-  createdAt: number;
-}
-
-// ==================== 4. 训练日志与组明细 (Workout & Sets) ====================
-export interface WorkoutSet {
-  id: string;
-  sessionId: string;              // 所属训练会话 ID
-  exerciseId: string;
-  setOrder: number;               // 第几组 (1, 2, 3...)
-  setType: SetType;               // 组类型
-  weight: number;                 // 重量 (0 表示自重/空)
-  unit: WeightUnit;               // 本组单位 ('kg' | 'lb')
-  reps: number;                   // 完成次数
-  rpe?: number;                   // 主观疲劳度 (1-10)
-  isCompleted: boolean;           // 是否打勾完成
-  isSkipped?: boolean;            // 是否跳过未做
-  isPR?: boolean;                 // 是否打破个人历史最好成绩
-  completedAt?: number;
-}
-
-export interface WorkoutSession {
-  id: string;
-  name: string;                   // 会话名称 (如 '周一腿日力量训练')
-  routineId?: string;             // 关联的计划模板 ID (可选)
-  startTime: number;              // 开始时间戳
-  endTime?: number;               // 结束时间戳
-  durationSeconds: number;        // 总训练时长 (秒)
-  totalVolumeKg: number;          // 统一折算为 kg 的训练总容量
-  feelingNotes?: string;          // 训练心得与感受 (如 '器械宽距高位下拉变轻松了呢！')
-  exerciseOrder: string[];        // 当天完成的动作 ID 列表
-  isFinished: boolean;            // 是否已结课完成
-  createdAt: number;
-}
-
-// ==================== 5. 身体体征数据 (BodyMetric) ====================
-export interface BodyMetric {
-  id: string;
-  date: string;                   // 日期格式 'YYYY-MM-DD'
-  weightKg?: number;              // 体重 (kg)
-  bodyFatRate?: number;           // 体脂率 (%)
-  muscleMassKg?: number;          // 骨骼肌 (kg)
-  chestCircumferenceCm?: number;  // 胸围 (cm)
-  waistCircumferenceCm?: number;  // 腰围 (cm)
-  hipCircumferenceCm?: number;    // 臀围 (cm)
-  leftArmCm?: number;             // 左大臂围 (cm)
-  rightArmCm?: number;            // 右大臂围 (cm)
-  leftThighCm?: number;           // 左大腿围 (cm)
-  rightThighCm?: number;          // 右大腿围 (cm)
-  notes?: string;
-  createdAt: number;
-}
-```
-
-### Dexie.js Schema 配置
-```typescript
-import Dexie, { Table } from 'dexie';
-
-export class FitnessDatabase extends Dexie {
-  exercises!: Table<Exercise, string>;
-  routines!: Table<Routine, string>;
-  workoutSessions!: Table<WorkoutSession, string>;
-  workoutSets!: Table<WorkoutSet, string>;
-  bodyMetrics!: Table<BodyMetric, string>;
-
-  constructor() {
-    super('FitnessTrackerDB');
-    this.version(1).stores({
-      exercises: 'id, name, primaryMuscle, equipment, isCustom',
-      routines: 'id, name, splitType, dayOfWeek, isBuiltin',
-      workoutSessions: 'id, routineId, startTime, isFinished',
-      workoutSets: 'id, sessionId, exerciseId, isCompleted, isPR',
-      bodyMetrics: 'id, date'
-    });
-  }
-}
-
-export const db = new FitnessDatabase();
-```
+1. **顶部标题与新建栏**：
+   - 标题：「训练计划模板」，副标题提示：「点击任意计划展开微调动作与组数，或直接一键开练」。
+   - 右侧主按钮：**「+ 新建计划」**（点击打开新建计划弹窗或直接在列表顶部创建新计划并自动展开进入编辑态）。
+2. **手风琴计划卡片列表 (Accordion Cards)**：
+   - **卡片收起头部（常驻可见）**：
+     - 左侧（点击可切换展开/收起）：
+       - 第一行：**计划名称**（如 `推拉腿 - 推日 (胸/肩/三头)`） + **星期几徽章**（若设置了 `dayOfWeek`，显示如 `周一` 胶囊徽章） + 展开箭头 `ChevronDown`。
+       - 第二行：包含的动作数量及名称概览（如 `5 个动作 · 杠铃平板卧推 · 上斜哑铃卧推 · 坐姿哑铃推肩...`）。
+     - 右侧（独立操作，不触发展开）：
+       - **「一键开练」按钮**：点击立即按该计划生成新的 `WorkoutSession`（若当前已有未完成的训练会话，先弹窗确认「当前有未完成的训练，是否结束/替换并开始新计划？」），并自动跳转至 Tab 1（`workout`）。
+   - **卡片展开面板（原地实时微调区，使用 `.expandable-panel` 平滑展开）**：
+     - **第一栏：计划基础信息微调**：
+       - **计划名称输入框**：支持直接修改计划名称（`onBlur` 或 `onChange` 实时写入 `db.routines.update`）。
+       - **推荐训练日选择（星期绑定）**：横向一排轻量胶囊按钮：`不限`、`周一`、`周二`、`周三`、`周四`、`周五`、`周六`、`周日`，点击即切换 `routine.dayOfWeek`。
+     - **第二栏：计划内动作明细列表（逐行微调）**：
+       - 每一行对应一个 `RoutineExercise`，展示：
+         1. **排序与动作名**：左侧提供上下移动箭头（`ArrowUp` / `ArrowDown`）调整动作先后顺序 + 动作名称 + 肌群小字。
+         2. **目标组数步进器**：`[-]` `4 组` `[+]`（范围 `1 ~ 15` 组，点击实时更新 `targetSets`）。
+         3. **目标次数步进器**：`[-]` `10 次` `[+]`（范围 `1 ~ 50` 次，点击实时更新 `targetReps`）。
+         4. **休息时长快捷切换**：点击循环切换或下拉选择 `60s / 90s / 120s / 180s`（实时更新 `restSeconds`）。
+         5. **移除动作按钮（`Trash2`）**：将该动作从计划模板中移除。
+     - **第三栏：计划底部操作栏**：
+       - 左侧：**「+ 添加动作到此计划」**（点击唤起复用动作选择 `<dialog>`，选定动作后追加到当前计划末尾，默认 `4 组 × 10 次 · 90s 休息`）。
+       - 右侧：**「复制计划」**（一键克隆副本方便做 A/B 计划微调） + **「删除计划」**（带 `window.confirm` 二次确认，预置计划与自定义计划均支持删除，若删空可通过设置里的恢复出厂重置）。
 
 ---
 
-## 6. 预置动作库规范 (30+ 核心动作清单)
+### 5.3 Tab 3：动作库 (`ExerciseLibraryTab.tsx`)
 
-系统初始启动时自动初始化如下 32 个黄金经典训练动作，满足常见分化需求：
-
-| 编号 | 动作名称 | 主肌群 | 辅助肌群 | 推荐器械 | 默认单位 | 核心要领简要 |
-|:---:|:---|:---:|:---:|:---:|:---:|:---|
-| 01 | 哑铃卧推 | 胸部 | 三头/肩前 | 哑铃 | lb | 沉肩锁背，手肘内夹 45-60 度，顶峰推起不锁死 |
-| 02 | 杠铃卧推 | 胸部 | 三头/肩前 | 杠铃 | kg | 五点支撑，杠铃下落至乳头连线上方，核心收紧 |
-| 03 | 上斜哑铃卧推 | 胸部 (上胸) | 三头/肩前 | 哑铃 | lb | 卧推椅 30 度角，直击上胸，缓慢下落充分拉伸 |
-| 04 | 哑铃飞鸟 | 胸部 | 肩前束 | 哑铃 | lb | 微屈手臂成抱树姿势，胸肌拉伸感明显，切忌超伸 |
-| 05 | 器械推胸 | 胸部 | 肱三头肌 | 固定器械 | kg | 调整握把高度平齐中胸，专注胸大肌发力推挤 |
-| 06 | 器械夹胸 | 胸部 (中缝) | 前三角肌 | 固定器械 | kg | 肘部微曲保持固定角度，顶峰挤压胸肌 1-2 秒 |
-| 07 | 杠铃深蹲 | 腿部 (股四/臀) | 核心/腘绳 | 杠铃 | kg | 脊柱中立，髋膝协同折叠，大腿至少低于平行线 |
-| 08 | 哑铃深蹲 | 腿部 (股四/臀) | 核心 | 哑铃 | lb | 双手持哑铃或高脚杯抱持，膝盖朝向脚尖方向 |
-| 09 | 罗马尼亚硬拉 (RDL) | 腿部 (腘绳/臀) | 下背/竖脊 | 哑铃/杠铃 | lb | 微屈膝屈髋后推，重心在脚跟，感受腘绳肌强烈张力 |
-| 10 | 哑铃箭步蹲 | 腿部 (臀/单腿) | 核心平衡 | 哑铃 | lb | 身体躯干微微前倾激活臀部，后膝自然下沉微离地 |
-| 11 | 宽距器械蹬腿机 | 腿部 (臀/内收) | 股四头肌 | 固定器械 | kg | 脚踩高位宽距，膝盖不内扣，底部腰背紧贴靠背 |
-| 12 | 器械腿屈伸 | 腿部 (股四头) | 无 | 固定器械 | kg | 锁骨靠实靠背，双腿顶峰收缩挺直 1 秒，缓慢下放 |
-| 13 | 俯卧器械腿弯举 | 腿部 (腘绳肌) | 小腿 | 固定器械 | kg | 骨盆紧贴垫面不借力拱起，脚踝向臀部勾起收缩 |
-| 14 | 窄距深蹲跳 | 腿部 (爆发力) | 全身核心 | 自重/空 | kg | 徒手空重下蹲至半蹲，爆发向上跃起，缓冲轻盈落地 |
-| 15 | 引体向上 | 背部 (背阔肌) | 肱二头肌 | 自重 | kg | 沉肩下压带动手肘向下向后拉，下巴过杠或胸触杠 |
-| 16 | 弹力带辅助引体向上 | 背部 (背阔肌) | 肱二头肌 | 弹力带 | kg | 弹力带套于膝盖或脚掌提供上托助力，保持背部发力 |
-| 17 | 器械高位下拉 | 背部 (背阔肌) | 肱二头肌 | 固定器械 | kg | 躯干微微后倾 10 度，手肘垂直向下拉向锁骨处 |
-| 18 | 器械坐姿划船 | 背部 (中背/菱形)| 肱二头/后肩 | 绳索/器械 | lb | 挺胸沉肩，双肘贴近肋骨向后拉，顶峰夹紧背胛骨 |
-| 19 | 哑铃俯身划船 | 背部 (背阔/中背)| 核心稳定 | 哑铃 | lb | 俯身屈髋背部平直，哑铃沿弧线拉向小腹侧方 |
-| 20 | 器械俯身直臂下压 | 背部 (背阔下侧)| 三头长头 | 绳索滑轮 | lb | 手肘微屈固定锁定，双手下压至大腿前侧收缩背阔 |
-| 21 | 绳索面拉 (Face Pull) | 肩部 (后束/外旋)| 上背/斜方 | 绳索滑轮 | lb | 绳索高度平齐眼睛，向面部拉开双拳，拇指朝后 |
-| 22 | 哑铃推肩 (坐姿) | 肩部 (前束/中束)| 肱三头肌 | 哑铃 | lb | 靠背微倾 80 度，推起至头顶正上方，手肘不锁死 |
-| 23 | 哑铃侧平举 | 肩部 (中束) | 斜方肌 | 哑铃 | lb | 上身微前倾，手臂如倒水般向侧上方扬起至平齐 |
-| 24 | 俯身哑铃飞鸟 | 肩部 (后束) | 菱形肌 | 哑铃 | lb | 俯身贴近水平，手臂向两侧展开，意念专注于三角肌后束 |
-| 25 | 杠铃推举 (站姿) | 肩部 (全肩) | 核心/三头 | 杠铃 | kg | 站立核心绷紧，头部后让杠铃直线上推后头部前探复位 |
-| 26 | 哑铃交替弯举 | 手臂 (肱二头肌) | 前臂 | 哑铃 | lb | 动作过程伴随前臂外旋，大臂紧贴身体两侧不上抬 |
-| 27 | 绳索下压 | 手臂 (肱三头肌) | 无 | 绳索滑轮 | lb | 大臂垂直地面锁定，双臂伸直向下压紧三头肌 |
-| 28 | 仰卧杠铃臂屈伸 | 手臂 (肱三头肌) | 前臂 | 杠铃/曲杠 | kg | 大臂垂直微向后倾斜，下落至头顶上方充分拉伸长头 |
-| 29 | 平板支撑 (Plank) | 核心 (腹横肌) | 全身稳定 | 自重 | kg | 身体呈一条直线，腹部深层紧绷，避免骨盆塌陷 |
-| 30 | 悬垂举腿 | 核心 (腹直肌下部)| 屈髋肌群 | 自重/单杠 | kg | 骨盆主动向上卷起，不仅是抬腿，避免晃动借力 |
-| 31 | 健腹轮推拉 | 核心 (全腹直肌) | 肩/背阔 | 自重/器材 | kg | 保持微猫背卷腹姿势，缓慢向前滚出，靠腹肌力量拉回 |
-| 32 | 跑步机慢跑/爬坡 | 有氧/心肺 | 腿部肌肉 | 器械 | kg | 维持目标燃脂心率区间，坡度 4~8% 保护膝关节 |
+1. **顶部检索与新增区**：
+   - 搜索输入框（按中英文名称实时过滤） + **「+ 新增动作」** 按钮。
+   - 横向肌群过滤胶囊：`全部肌群`、`胸部`、`背部`、`腿部`、`肩部`、`手臂`、`核心`、`有氧/全身`。
+2. **动作卡片网格（2 列响应式）**：
+   - 常驻显示：动作名称、`主肌群 · 器械类型`、右侧 **`KG / LB` 默认单位一键切换按钮**（若为自定义动作额外显示删除按钮）。
+   - 点击卡片主体原地展开：展示动作标准步骤列表（`instructions`）与常见易错提示（`tips`）。
+3. **新增自定义动作弹窗 (`<dialog closedby="any">`)**：
+   - 录入项：动作名称（必填）、主肌群、器械类型、默认单位（KG/LB）、动作要领备注（选填）。
 
 ---
 
-## 7. 核心计算算法与业务逻辑 (Algorithms & Logic)
+### 5.4 Tab 4：记录与趋势 (`AnalyticsTab.tsx`)
 
-### 7.1 单位换算逻辑
-* 基准转换公式：
-  $$1 \text{ lb} = 0.45359237 \text{ kg}$$
-  $$1 \text{ kg} \approx 2.20462262 \text{ lb}$$
-* 存储规范：
-  - 用户实际录入的数值与原始单位存储在 `WorkoutSet.weight` 与 `WorkoutSet.unit` 中。
-  - 会话总容量统计时，统一转换为标准公斤数进行累加：
-    $$\text{Volume (kg)} = \sum (\text{weight} \times \text{reps} \times (\text{unit} = \text{'lb'} ? 0.453592 : 1))$$
-
-### 7.2 估算 1RM (最大单次重量) 算法
-采用业界验证最为精准的 **Epley 公式** 与 **Brzycki 公式** 综合加权：
-* 当完成次数 $\text{reps} = 1$ 时：$1\text{RM} = \text{weight}$
-* 当完成次数 $2 \le \text{reps} \le 12$ 时（Epley 公式）：
-  $$1\text{RM} = \text{weight} \times \left(1 + \frac{\text{reps}}{30}\right)$$
-* 当完成次数 $> 12$ 时，1RM 预测误差增大，降权处理仅作参考。
-
-### 7.3 渐进超负荷与 PR 判定逻辑
-在用户点击打勾完成某一训练组时，触发自动校验函数 `checkProgressiveOverload(exerciseId, weight, reps, unit)`：
-1. 从 Dexie 查询该动作历史所有完成组的最大估算 1RM。
-2. 若当前组的估算 1RM 超过历史纪录，则将该组标记为 `isPR = true`。
-3. 界面触发彩带微动效与金色“新纪录 PR”徽章展示。
+1. **第一部分：顶部 3 项核心汇总指标卡 (`grid-cols-3`)**：
+   - **累计打卡**：已完成训练总场次（次）。
+   - **累计总容量**：历史所有完成组折算总吨数（吨，保留 1 位小数）。
+   - **最新体重**：最近一次录入的体重（`kg`，若同时录入了体脂率则在副标题小字展示 `体脂 XX%`）。
+2. **第二部分：二合一可切换趋势图 + 快速体重记录**：
+   - **图表卡片头部**：左侧标题，右侧分段切换胶囊 **`[训练容量 (kg)]` / `[体重变化 (kg)]`**。
+     - 当选中「训练容量」时：展示最近 12 场训练的总容量 `AreaChart` 面积折线图。
+     - 当选中「体重变化」时：展示最近 15 次体重记录的 `AreaChart` 折线图。
+   - **单行快速记录今日体重条**：内嵌在图表下方，包含 `体重 (kg)` 输入框、`体脂 % (选填)` 输入框与 **「记录」** 按钮，提交后立即刷新最新体重与体重走势图。
+3. **第三部分：可折叠历史训练日志列表**：
+   - 按训练开始时间倒序排列已完成的 `WorkoutSession`。
+   - 收起态：训练名称、日期星期、总用时、完成组数、总容量 (kg)、训练心得语录（若有）及删除按钮（带二次确认）。
+   - 点击展开后：按动作汇总展示当天完成的每一组 `重量(单位) × 次数` 明细（如 `杠铃卧推: 60kg×10 / 65kg×8 / 65kg×8`）。
+4. **第四部分：本地离线数据备份与恢复栏**：
+   - 提供 **「导出 JSON」**、**「导入恢复（合并模式）」** 与 **「重置出厂数据（带二次确认）」**。
 
 ---
 
-## 8. PWA、防息屏与数据导入导出方案
+## 6. 数据模型与真实训练日志预置规范 (Seed & Migration Contract)
 
-### 8.1 屏幕防息屏 (Screen Wake Lock API)
-在力量训练会话期间，调用浏览器原生 API 防止 iOS/Android 屏幕自动变暗息屏：
-```typescript
-let wakeLockSentinel: WakeLockSentinel | null = null;
+现有 `src/types/fitness.ts` 与 `src/db/database.ts` 完全满足 v2.0 需求。同时，基于用户提供的 **2026年7月20日 ~ 2026年10月22日 共 29 场真实训练日志**，对预置动作库、默认分化计划与历史日志数据进行全量定制：
 
-export async function requestKeepScreenOn(): Promise<void> {
-  if ('wakeLock' in navigator) {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-    } catch (err) {
-      console.warn('Wake Lock request failed:', err);
-    }
-  }
-}
+### 6.1 真实训练分化计划 (`INITIAL_ROUTINES`)
+根据用户最新（9月~10月）稳定执行的训练周期，预置以下 5 套专属计划模板：
+1. **周一 · 臀腿综合训练 (`routine_user_legs`, 周一 `dayOfWeek: 1`)**：
+   - `哑铃深蹲` (6组×12次, lb) · `哑铃罗马尼亚硬拉` (6组×12次, lb) · `箭步蹲` (6组×12次, lb) · `窄距深蹲跳` (4组×12次, 自重) · `器械腿屈伸` (2组×12次, kg) · `宽距器械蹬腿机` (6组×15次, kg)
+2. **周二 · 胸部全维轰炸 (`routine_user_chest`, 周二 `dayOfWeek: 2`)**：
+   - `哑铃卧推` (6组×12次, lb) · `哑铃飞鸟` (6组×12次, lb) · `器械推胸` (6组×12次, kg) · `器械夹胸` (6组×12次, kg) · `上斜哑铃卧推` (6组×12次, lb) · `上斜哑铃飞鸟` (6组×12次, lb)
+3. **周四 · 背部与后束强化 (`routine_user_back`, 周四 `dayOfWeek: 4`)**：
+   - `器械坐姿划船` (6组×12次, lb) · `器械俯身直臂下压` (6组×15次, lb) · `哑铃俯身划船` (6组×12次, lb) · `绳索面拉` (6组×15次, lb) · `器械宽距高位下拉` (6组×12次, kg) · `弹力带辅助引体向上` (4组×12次, 自重)
+4. **周五 · 肩部与三头联合 (`routine_user_shoulders_arms`, 周五 `dayOfWeek: 5`)**：
+   - `哑铃推举` (6组×12次, lb) · `哑铃颈后臂屈伸` (6组×12次, lb) · `哑铃前平举` (6组×12次, lb) · `绳索直杆下压` (6组×12次, lb) · `俯身哑铃飞鸟` (6组×12次, lb) · `绳索三头下压` (5组×12次, lb) · `凳上臂屈伸` (4组×12次, 自重) · `哑铃俯身臂屈伸` (6组×12次, lb)
+5. **备选 · 上斜胸与中缝专项 (`routine_user_incline_chest`, 周六 `dayOfWeek: 6`)**：
+   - `上斜哑铃卧推` (6组×12次, lb) · `上斜哑铃飞鸟` (6组×12次, lb) · `器械推胸` (6组×12次, kg) · `器械蝴蝶机夹胸` (6组×12次, kg) · `上斜窄距杠铃卧推` (4组×12次, lb) · `龙门架绳索夹胸` (6组×12次, lb)
 
-export function releaseKeepScreenOn(): void {
-  if (wakeLockSentinel) {
-    wakeLockSentinel.release();
-    wakeLockSentinel = null;
-  }
-}
-```
+### 6.2 29 场真实训练日志全量导入与自动迁移
+- 将 `2026-07-20` 至 `2026-10-22` 的全部 29 场训练会话（含精确日期、每组重量/单位/次数、热身组与力竭组标记、未做跳过标记 `isSkipped: true`、以及如 `“器械宽距高位下拉变轻松了呢！”`、`“下次保持，有点勉强”`、`“2 改 25 了 -…-”` 等原汁原味的随手记备注）完整编码入 `src/db/seedData.ts`。
+- 在 `ensureDatabaseSeeded()` 中通过数据版本标记（`localStorage.getItem('fitness_seed_v2_real_logs')`）自动检测：若浏览器中仍是旧版 4 条虚拟 Demo 数据，则自动替换为这 29 场真实训练日志与 5 套专属计划模板，无需用户手动点重置即可直接看到全部真实历史数据。
 
-### 8.2 Web Audio 组间休息提示音
-无需加载外部 mp3 静态大文件，采用原生 Web Audio API 合成轻量清脆双音节哔声（880Hz / 1760Hz）：
-```typescript
-export function playRestTimerBeep(): void {
-  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(880, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.15);
-  gain.gain.setValueAtTime(0.3, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.start();
-  osc.stop(ctx.currentTime + 0.25);
-  if ('vibrate' in navigator) {
-    navigator.vibrate([200, 100, 200]);
-  }
-}
-```
+---
 
-### 8.3 数据导入与导出规范 (JSON Snapshot)
-* 导出文件命名约定：`fitness-backup-YYYY-MM-DD-HHmm.json`
-* 包含字段：
-  ```json
-  {
-    "version": 1,
-    "exportedAt": 1729938000000,
-    "appName": "FitnessTracker",
-    "data": {
-      "exercises": [...],
-      "routines": [...],
-      "workoutSessions": [...],
-      "workoutSets": [...],
-      "bodyMetrics": [...]
-    }
-  }
-  ```
-* 导入保障：导入前进行 JSON Schema 格式合法性校验，支持“覆盖合并”与“全量替换”两种模式，保障历史数据不丢失。
+## 7. 关键业务算法与联动逻辑
+
+1. **按模板一键开练的重量继承算法**：
+   - 遍历 `routine.exercises`，对每个动作查询 `getLastPerformanceForExercise(exerciseId, newSessionId)`。
+   - 目标单位取 `exercise.defaultUnit || item.targetUnit || 'kg'`。
+   - 对第 `1 .. item.targetSets` 组：若上次有对应第 `i` 组（或最后一组）记录，将其重量通过 `convertWeight(prevSet.weight, prevSet.unit, unit)` 转换为当前单位（四舍五入至 `0.5` 步进）；次数默认取模板设定的 `item.targetReps`（优先遵循用户在模板中微调的目标次数）。若无历史记录，杠铃/哑铃/器械默认给初始引导重量（`20kg` 或 `45lb`），自重动作给 `0`。
+2. **训练结课反向同步模板算法 (`hasRoutineDiff` & `syncSessionToRoutine`)**：
+   - **差异判定 (`hasRoutineDiff`)**：当 `currentSession.routineId` 指向有效 `Routine` 时，提取当前会话中的 `exerciseOrder` 及每个动作下的组列表（若某动作有已完成组则取已完成组，否则取该动作当前全部组）。只要满足以下任一条件即视为有变更：
+     1. 动作 ID 序列与 `routine.exercises.map(e => e.exerciseId)` 长度或顺序不同；
+     2. 任意动作在本次会话中的组数与 `routine.exercises[i].targetSets` 不同。
+   - **同步写入 (`syncSessionToRoutine`)**：根据当前会话的 `exerciseOrder` 生成新的 `RoutineExercise[]`：
+     - 若动作原本就在该 `Routine` 中：保留原有的 `restSeconds` 与 `targetUnit`，将 `targetSets` 更新为本次组数，`targetReps` 更新为本次该动作第一组（或已完成组）的 `reps`。
+     - 若动作是本次训练中途新加的：`targetSets` 取本次组数，`targetReps` 取首组次数，`restSeconds` 默认 `90`，`targetUnit` 取动作当前 `defaultUnit`。
+
+---
+
+## 8. Modern Web Guidance 现代 Web 规范落地清单
+
+1. **`light-dismiss-a-dialog`**：所有模态框（动作选择器、新建计划、完成训练确认、新增自定义动作）统一使用原生 `<dialog closedby="any">` 并通过 `.showModal()` 打开，同时挂载 Safari 兼容的坐标边界点击关闭监听器。
+2. **`animate-to-intrinsic-sizes`**：在 `:root` 启用 `interpolate-size: allow-keywords`，所有可折叠区域（计划卡片微调区、动作库要领、历史训练详情）统一使用 `.expandable-panel`（`block-size: auto; block-size: calc-size(auto, size);`），同步 `aria-expanded` 与 `hidden` 属性，并在 `@media (prefers-reduced-motion: reduce)` 下禁用过渡。
+3. **`dark-mode`**：在 `index.html` 声明 `<meta name="color-scheme" content="dark" />`，在 `:root` 设置 `color-scheme: dark`、`accent-color: #10b981` 及 `scrollbar-width: thin; scrollbar-color: #334155 #090d16;`。
+4. **`improve-text-layout-and-legibility`**：仅对标题元素 `h1~h4` 应用 `text-wrap: balance`，对段落与列表项 `p, li` 应用 `text-wrap: pretty`。
+5. **`responsive-design`**：全局容器使用动态视口单位 `min-h-dvh`，配合 iOS 安全区 `env(safe-area-inset-top/bottom)`。
+
+---
+
+## 9. 留给实现者的工程细节决策 (Left to the Builder)
+
+- **新建计划的交互形式**：点击「+ 新建计划」时，弹出一个极简 `<dialog>` 让用户输入计划名称、选择推荐星期几，确认后立即创建并自动在列表中展开该计划卡片，并自动弹出动作选择器方便添加动作。
+- **训练中点击「一键开练」的冲突保护**：如果当前已有未完成的 `WorkoutSession`，在「计划」页点击另一个模板的「一键开练」时，弹出原生 `window.confirm('当前有正在进行的训练，是否放弃当前训练并开始新计划？')`，确认后清理旧未完成会话并启动新计划。
+- **动作专属休息秒数传递**：在 `ActiveWorkoutTab` 中勾选完成某组时，若当前训练关联了 `Routine` 且该动作在模板中配置了 `restSeconds`（如 `60s` 或 `120s`），则优先使用该动作配置的 `restSeconds` 启动底部倒计时，否则默认使用 `90s`。

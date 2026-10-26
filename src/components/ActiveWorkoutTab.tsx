@@ -10,12 +10,18 @@ import {
   Search,
   Dumbbell,
   CheckCircle2,
+  StickyNote,
+  Sparkles,
+  Settings2,
   X,
 } from 'lucide-react';
 import {
   db,
   checkProgressiveOverloadPR,
   getLastPerformanceForExercise,
+  startWorkoutFromRoutine,
+  hasRoutineDiff,
+  syncSessionToRoutine,
 } from '../db/database';
 import {
   Exercise,
@@ -41,12 +47,15 @@ import {
 
 interface ActiveWorkoutTabProps {
   onStartRestTimer: (seconds: number, exerciseName: string) => void;
+  onNavigateToRoutines: () => void;
 }
 
 const SET_TYPES_CYCLE: SetType[] = ['normal', 'warmup', 'drop', 'failure'];
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
   onStartRestTimer,
+  onNavigateToRoutines,
 }) => {
   const activeSessions = useLiveQuery(
     () => db.workoutSessions.filter((s) => !s.isFinished).toArray(),
@@ -66,8 +75,11 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       [currentSession?.id]
     ) || [];
 
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(
+    null
+  );
   const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [openNoteExIds, setOpenNoteExIds] = useState<Record<string, boolean>>({});
 
   // Native Dialog Refs
   const pickerDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -76,6 +88,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
   const [pickerSearch, setPickerSearch] = useState('');
   const [pickerMuscle, setPickerMuscle] = useState<MuscleGroup | 'all'>('all');
   const [feelingInput, setFeelingInput] = useState('');
+  const [syncBackToRoutine, setSyncBackToRoutine] = useState(true);
 
   // History cache per exercise
   const [historyMap, setHistoryMap] = useState<
@@ -105,7 +118,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
 
     dialogs.forEach((d) => d.addEventListener('click', handleBackdropClick));
     return () => {
-      dialogs.forEach((d) => d.removeEventListener('click', handleBackdropClick));
+      dialogs.forEach((d) =>
+        d.removeEventListener('click', handleBackdropClick)
+      );
     };
   }, [currentSession?.id]);
 
@@ -147,9 +162,15 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     if (!currentSession) return;
     let active = true;
     (async () => {
-      const nextMap: Record<string, { sets: WorkoutSet[]; lastNote?: string }> = {};
+      const nextMap: Record<
+        string,
+        { sets: WorkoutSet[]; lastNote?: string }
+      > = {};
       for (const exId of currentSession.exerciseOrder) {
-        nextMap[exId] = await getLastPerformanceForExercise(exId, currentSession.id);
+        nextMap[exId] = await getLastPerformanceForExercise(
+          exId,
+          currentSession.id
+        );
       }
       if (active) setHistoryMap(nextMap);
     })();
@@ -164,59 +185,15 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     return map;
   }, [allExercises]);
 
-  const startFromRoutine = async (routine: Routine) => {
-    const sessionId = `ws_${Date.now()}`;
-    const exerciseOrder = routine.exercises.map((item) => item.exerciseId);
-    const newSets: WorkoutSet[] = [];
+  const associatedRoutine: Routine | undefined = React.useMemo(() => {
+    if (!currentSession?.routineId) return undefined;
+    return allRoutines.find((r) => r.id === currentSession.routineId);
+  }, [allRoutines, currentSession?.routineId]);
 
-    for (const item of routine.exercises) {
-      const ex = exerciseMap.get(item.exerciseId);
-      const unit: WeightUnit = ex?.defaultUnit || item.targetUnit || 'kg';
-      const lastPerf = await getLastPerformanceForExercise(item.exerciseId, sessionId);
-
-      for (let i = 1; i <= item.targetSets; i++) {
-        const prevSet =
-          lastPerf.sets[i - 1] || lastPerf.sets[lastPerf.sets.length - 1];
-        const defaultWeight = prevSet
-          ? convertWeight(prevSet.weight, prevSet.unit, unit)
-          : unit === 'lb'
-          ? 45
-          : 20;
-        const defaultReps = prevSet ? prevSet.reps : item.targetReps;
-
-        newSets.push({
-          id: `set_${sessionId}_${item.exerciseId}_${i}_${Math.random()
-            .toString(36)
-            .slice(2, 6)}`,
-          sessionId,
-          exerciseId: item.exerciseId,
-          setOrder: i,
-          setType: 'normal',
-          weight: ex?.equipment === 'bodyweight' ? 0 : defaultWeight,
-          unit,
-          reps: defaultReps,
-          isCompleted: false,
-        });
-      }
-    }
-
-    const newSession: WorkoutSession = {
-      id: sessionId,
-      name: routine.name,
-      routineId: routine.id,
-      startTime: Date.now(),
-      durationSeconds: 0,
-      totalVolumeKg: 0,
-      exerciseOrder,
-      isFinished: false,
-      createdAt: Date.now(),
-    };
-
-    await db.transaction('rw', [db.workoutSessions, db.workoutSets], async () => {
-      await db.workoutSessions.put(newSession);
-      if (newSets.length > 0) await db.workoutSets.bulkPut(newSets);
-    });
-  };
+  const routineHasChanged = React.useMemo(() => {
+    if (!currentSession || !associatedRoutine) return false;
+    return hasRoutineDiff(currentSession, sessionSets, associatedRoutine);
+  }, [currentSession, sessionSets, associatedRoutine]);
 
   const startFreeWorkout = async () => {
     const sessionId = `ws_${Date.now()}`;
@@ -241,14 +218,14 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         exercise.id,
         currentSession.id
       );
-      const unit = exercise.defaultUnit || 'kg';
+      const unit = exercise.defaultUnit || 'lb';
       const prevSet = lastPerf.sets[0];
       const initWeight = prevSet
         ? convertWeight(prevSet.weight, prevSet.unit, unit)
-        : exercise.equipment === 'bodyweight'
+        : exercise.equipment === 'bodyweight' || exercise.equipment === 'band'
         ? 0
         : unit === 'lb'
-        ? 45
+        ? 25
         : 20;
 
       const firstSet: WorkoutSet = {
@@ -259,19 +236,67 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         setType: 'normal',
         weight: initWeight,
         unit,
-        reps: prevSet ? prevSet.reps : 10,
+        reps: prevSet ? prevSet.reps : 12,
         isCompleted: false,
       };
 
-      await db.transaction('rw', [db.workoutSessions, db.workoutSets], async () => {
-        await db.workoutSessions.update(currentSession.id, {
-          exerciseOrder: nextOrder,
-        });
-        await db.workoutSets.put(firstSet);
-      });
+      await db.transaction(
+        'rw',
+        [db.workoutSessions, db.workoutSets],
+        async () => {
+          await db.workoutSessions.update(currentSession.id, {
+            exerciseOrder: nextOrder,
+          });
+          await db.workoutSets.put(firstSet);
+        }
+      );
     }
     setSelectedExerciseId(exercise.id);
     pickerDialogRef.current?.close();
+  };
+
+  const handleRemoveExerciseFromSession = async (
+    exerciseId: string,
+    exerciseName: string
+  ) => {
+    if (!currentSession) return;
+    const exSets = sessionSets.filter((s) => s.exerciseId === exerciseId);
+    if (
+      exSets.some((s) => s.isCompleted) &&
+      !window.confirm(`确定从本次训练中移除「${exerciseName}」吗？`)
+    ) {
+      return;
+    }
+    const nextOrder = currentSession.exerciseOrder.filter(
+      (id) => id !== exerciseId
+    );
+    await db.transaction(
+      'rw',
+      [db.workoutSessions, db.workoutSets],
+      async () => {
+        await db.workoutSessions.update(currentSession.id, {
+          exerciseOrder: nextOrder,
+        });
+        await db.workoutSets
+          .where('sessionId')
+          .equals(currentSession.id)
+          .filter((s) => s.exerciseId === exerciseId)
+          .delete();
+      }
+    );
+  };
+
+  const handleUpdateExerciseNote = async (exerciseId: string, note: string) => {
+    if (!currentSession) return;
+    const nextNotes = { ...(currentSession.exerciseNotes || {}) };
+    if (note.trim()) {
+      nextNotes[exerciseId] = note;
+    } else {
+      delete nextNotes[exerciseId];
+    }
+    await db.workoutSessions.update(currentSession.id, {
+      exerciseNotes: nextNotes,
+    });
   };
 
   const handleAddSet = async (exerciseId: string) => {
@@ -281,7 +306,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       .sort((a, b) => a.setOrder - b.setOrder);
     const lastSet = exSets[exSets.length - 1];
     const ex = exerciseMap.get(exerciseId);
-    const unit = lastSet?.unit || ex?.defaultUnit || 'kg';
+    const unit = lastSet?.unit || ex?.defaultUnit || 'lb';
 
     const newSet: WorkoutSet = {
       id: `set_${Date.now()}_${exSets.length + 1}`,
@@ -289,9 +314,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       exerciseId,
       setOrder: exSets.length + 1,
       setType: 'normal',
-      weight: lastSet ? lastSet.weight : 20,
+      weight: lastSet ? lastSet.weight : 25,
       unit,
-      reps: lastSet ? lastSet.reps : 10,
+      reps: lastSet ? lastSet.reps : 12,
       isCompleted: false,
     };
     await db.workoutSets.put(newSet);
@@ -333,7 +358,10 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     );
   };
 
-  const handleToggleCompleteSet = async (set: WorkoutSet, exercise: Exercise) => {
+  const handleToggleCompleteSet = async (
+    set: WorkoutSet,
+    exercise: Exercise
+  ) => {
     const nextCompleted = !set.isCompleted;
     let isPR = false;
     if (nextCompleted) {
@@ -346,7 +374,12 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       );
       playSetCheckSound();
       if (isPR) triggerCelebrationConfetti(false);
-      onStartRestTimer(90, exercise.name);
+
+      const routineEx = associatedRoutine?.exercises.find(
+        (e) => e.exerciseId === exercise.id
+      );
+      const restSec = routineEx?.restSeconds || 90;
+      onStartRestTimer(restSec, exercise.name);
     }
     await db.workoutSets.update(set.id, {
       isCompleted: nextCompleted,
@@ -357,6 +390,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
 
   const handleFinishWorkout = async () => {
     if (!currentSession) return;
+    if (routineHasChanged && syncBackToRoutine && associatedRoutine) {
+      await syncSessionToRoutine(currentSession, sessionSets, associatedRoutine);
+    }
     const totalVol = calculateSessionVolumeKg(sessionSets);
     await db.workoutSessions.update(currentSession.id, {
       endTime: Date.now(),
@@ -373,51 +409,128 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
   const handleDiscardWorkout = async () => {
     if (!currentSession) return;
     if (!window.confirm('确定放弃本次未完成的训练吗？')) return;
-    await db.transaction('rw', [db.workoutSessions, db.workoutSets], async () => {
-      await db.workoutSets.where('sessionId').equals(currentSession.id).delete();
-      await db.workoutSessions.delete(currentSession.id);
-    });
+    await db.transaction(
+      'rw',
+      [db.workoutSessions, db.workoutSets],
+      async () => {
+        await db.workoutSets
+          .where('sessionId')
+          .equals(currentSession.id)
+          .delete();
+        await db.workoutSessions.delete(currentSession.id);
+      }
+    );
   };
 
-  // ==================== 状态 1：尚未开始训练（极简启动面板） ====================
+  // ==================== 状态 1：尚未开始训练（今日推荐 + 快捷计划列表） ====================
   if (!currentSession) {
-    return (
-      <div className="max-w-3xl mx-auto space-y-6 py-2">
-        <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-xl font-extrabold text-white">开始今日训练</h1>
-            <p className="text-xs text-slate-400">
-              选择预设分化模板一键生成训练组，或直接开始空白自由训练。
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={startFreeWorkout}
-            className="touch-target px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer shrink-0"
-          >
-            <Play className="w-4 h-4 fill-current" />
-            <span>空白自由训练</span>
-          </button>
-        </div>
+    const todayNum = new Date().getDay();
+    const todayName = WEEKDAY_NAMES[todayNum];
+    const recommendedRoutine =
+      allRoutines.find((r) => r.dayOfWeek === todayNum) || allRoutines[0];
+    const otherRoutines = allRoutines.filter(
+      (r) => r.id !== recommendedRoutine?.id
+    );
 
+    return (
+      <div className="max-w-3xl mx-auto space-y-5 py-1">
+        {/* Highlighted Today's Recommended Routine */}
+        {recommendedRoutine && (
+          <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 border border-emerald-500/35 p-5 space-y-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
+                  <Sparkles className="w-3 h-3" />
+                  <span>
+                    {recommendedRoutine.dayOfWeek === todayNum
+                      ? `今日推荐 (${todayName})`
+                      : '推荐训练计划'}
+                  </span>
+                </div>
+                <h1 className="text-xl font-extrabold text-white">
+                  {recommendedRoutine.name}
+                </h1>
+              </div>
+
+              <button
+                type="button"
+                onClick={onNavigateToRoutines}
+                className="touch-target px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-xs font-bold text-slate-300 flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Settings2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>微调计划</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {recommendedRoutine.exercises.map((item, i) => {
+                const ex = exerciseMap.get(item.exerciseId);
+                return (
+                  <span
+                    key={`${item.exerciseId}_${i}`}
+                    className="px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800 text-xs text-slate-200 font-medium"
+                  >
+                    {ex?.name || item.exerciseId}{' '}
+                    <span className="text-emerald-400 font-mono">
+                      {item.targetSets}×{item.targetReps}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => startWorkoutFromRoutine(recommendedRoutine)}
+                className="touch-target flex-1 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>按此计划开练 (自动带出上次重量)</span>
+              </button>
+              <button
+                type="button"
+                onClick={startFreeWorkout}
+                className="touch-target px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>空白自由训练</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Other Routines Grid */}
         <div className="space-y-3">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-            快捷分化计划模板
-          </h2>
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              其他分化计划模板
+            </h2>
+            <button
+              type="button"
+              onClick={onNavigateToRoutines}
+              className="text-xs font-bold text-emerald-400 hover:underline cursor-pointer"
+            >
+              管理 / 新建计划 →
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {allRoutines.map((routine) => (
+            {otherRoutines.map((routine) => (
               <div
                 key={routine.id}
-                className="rounded-2xl bg-slate-900/70 border border-slate-800/90 hover:border-slate-700 p-4 flex flex-col justify-between gap-4 transition"
+                className="rounded-2xl bg-slate-900/75 border border-slate-800/90 hover:border-slate-700 p-4 flex flex-col justify-between gap-3 transition"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-base font-bold text-white">{routine.name}</h3>
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">
-                      {routine.exercises.length} 个动作
+                    <h3 className="text-sm font-bold text-white truncate">
+                      {routine.name}
+                    </h3>
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 shrink-0">
+                      {routine.exercises.length} 动作
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1 line-clamp-1">
+                  <p className="text-xs text-slate-400 mt-1 line-clamp-2">
                     {routine.exercises
                       .map((e) => exerciseMap.get(e.exerciseId)?.name || '')
                       .filter(Boolean)
@@ -427,11 +540,11 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => startFromRoutine(routine)}
-                  className="touch-target w-full py-2.5 rounded-xl bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  onClick={() => startWorkoutFromRoutine(routine)}
+                  className="touch-target w-full py-2 rounded-xl bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>按此模板开练</span>
+                  <span>一键开练</span>
                 </button>
               </div>
             ))}
@@ -453,8 +566,10 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       .filter((s) => s.exerciseId === exerciseId)
       .sort((a, b) => a.setOrder - b.setOrder);
     const lastPerf = historyMap[exerciseId];
-    const unit = exercise.defaultUnit || 'kg';
+    const unit = exercise.defaultUnit || 'lb';
     const stepDelta = unit === 'lb' ? 5 : 2.5;
+    const currentNote = currentSession.exerciseNotes?.[exerciseId] || '';
+    const isNoteOpen = Boolean(openNoteExIds[exerciseId] || currentNote);
 
     return (
       <div
@@ -462,34 +577,82 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 space-y-3"
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-extrabold text-white">{exercise.name}</h3>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-extrabold text-white">
+                {exercise.name}
+              </h3>
               <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                {MUSCLE_LABELS[exercise.primaryMuscle]} · {EQUIPMENT_LABELS[exercise.equipment]}
+                {MUSCLE_LABELS[exercise.primaryMuscle]} ·{' '}
+                {EQUIPMENT_LABELS[exercise.equipment]}
               </span>
             </div>
             {lastPerf && lastPerf.sets.length > 0 && (
               <p className="text-[11px] text-slate-400 mt-0.5">
-                上次最佳:{' '}
+                上次:{' '}
                 {lastPerf.sets
-                  .slice(0, 3)
+                  .slice(0, 4)
                   .map((s) => `${s.weight}${s.unit}×${s.reps}`)
-                  .join(', ')}
+                  .join(' / ')}
+                {lastPerf.lastNote ? ` · 📝 ${lastPerf.lastNote}` : ''}
               </p>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleToggleExerciseUnit(exercise)}
-            className="touch-target px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-slate-700 cursor-pointer"
-            title="切换该动作默认单位 (kg/lb)"
-          >
-            单位: {unit.toUpperCase()}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleToggleExerciseUnit(exercise)}
+              className="touch-target px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-slate-700 cursor-pointer"
+              title="切换该动作默认单位 (kg/lb)"
+            >
+              {unit.toUpperCase()}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setOpenNoteExIds((prev) => ({
+                  ...prev,
+                  [exerciseId]: !prev[exerciseId],
+                }))
+              }
+              className={`touch-target p-2 rounded-xl border transition cursor-pointer ${
+                isNoteOpen
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+              }`}
+              title="记录该动作随手记便签"
+            >
+              <StickyNote className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                handleRemoveExerciseFromSession(exerciseId, exercise.name)
+              }
+              className="touch-target p-2 rounded-xl bg-slate-800/70 hover:bg-rose-950/50 text-slate-400 hover:text-rose-300 cursor-pointer"
+              title="移除该动作"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {/* Collapsible Single-Line Exercise Sticky Note */}
+        {isNoteOpen && (
+          <div>
+            <input
+              type="text"
+              value={currentNote}
+              onChange={(e) =>
+                handleUpdateExerciseNote(exerciseId, e.target.value)
+              }
+              placeholder="随手记（如：变轻松了呢！ / 下次保持，有点勉强）..."
+              className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-emerald-300 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+        )}
 
         {/* Set Rows */}
         <div className="space-y-2">
@@ -505,7 +668,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
                 }`}
               >
                 {/* Set index & type */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => handleCycleSetType(set)}
@@ -531,19 +694,24 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
                   >
                     <Minus className="w-4 h-4" />
                   </button>
-                  <div className="w-20 text-center">
+                  <div className="w-18 text-center">
                     <input
                       type="number"
                       step="0.5"
                       value={set.weight}
                       onChange={(e) =>
                         db.workoutSets.update(set.id, {
-                          weight: Math.max(0, parseFloat(e.target.value) || 0),
+                          weight: Math.max(
+                            0,
+                            parseFloat(e.target.value) || 0
+                          ),
                         })
                       }
                       className="w-full text-center bg-transparent text-base font-extrabold text-white focus:outline-none"
                     />
-                    <div className="text-[10px] text-slate-400 -mt-1">{set.unit}</div>
+                    <div className="text-[10px] text-slate-400 -mt-1">
+                      {set.unit}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -605,7 +773,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDeleteSet(set)}
-                    className="w-9 h-10 rounded-xl text-slate-500 hover:text-rose-400 flex items-center justify-center cursor-pointer"
+                    className="w-8 h-10 rounded-xl text-slate-500 hover:text-rose-400 flex items-center justify-center cursor-pointer"
                     title="删除该组"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -630,7 +798,8 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
   };
 
   const filteredExercises = allExercises.filter((ex) => {
-    const matchMuscle = pickerMuscle === 'all' || ex.primaryMuscle === pickerMuscle;
+    const matchMuscle =
+      pickerMuscle === 'all' || ex.primaryMuscle === pickerMuscle;
     const matchQuery =
       !pickerSearch.trim() ||
       ex.name.toLowerCase().includes(pickerSearch.trim().toLowerCase());
@@ -641,16 +810,18 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     <div className="space-y-4">
       {/* Compact Session Status Bar */}
       <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3.5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-sm font-extrabold text-white">{currentSession.name}</h2>
-            <div className="text-xs text-slate-400 flex items-center gap-3 mt-0.5 font-mono">
-              <span>用时 {formatDuration(elapsedSec)}</span>
-              <span>·</span>
-              <span>完成 {completedCount} 组</span>
-              <span>·</span>
-              <span>容量 {totalVolKg} kg</span>
-            </div>
+        <div>
+          <h2 className="text-sm font-extrabold text-white">
+            {currentSession.name}
+          </h2>
+          <div className="text-xs text-slate-400 flex items-center gap-2.5 mt-0.5 font-mono">
+            <span>用时 {formatDuration(elapsedSec)}</span>
+            <span>·</span>
+            <span>
+              完成 {completedCount}/{sessionSets.length} 组
+            </span>
+            <span>·</span>
+            <span>容量 {totalVolKg} kg</span>
           </div>
         </div>
 
@@ -686,7 +857,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       {currentSession.exerciseOrder.length === 0 ? (
         <div className="rounded-2xl bg-slate-900/50 border border-dashed border-slate-800 p-10 text-center space-y-3">
           <Dumbbell className="w-8 h-8 text-slate-500 mx-auto" />
-          <div className="text-sm font-bold text-slate-300">尚未添加训练动作</div>
+          <div className="text-sm font-bold text-slate-300">
+            尚未添加训练动作
+          </div>
           <button
             type="button"
             onClick={() => pickerDialogRef.current?.showModal()}
@@ -700,7 +873,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         <>
           {/* Mobile Vertical Stack */}
           <div className="md:hidden space-y-3">
-            {currentSession.exerciseOrder.map((exId) => renderExerciseCard(exId))}
+            {currentSession.exerciseOrder.map((exId) =>
+              renderExerciseCard(exId)
+            )}
           </div>
 
           {/* iPad / Desktop Master-Detail Split Layout */}
@@ -712,7 +887,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
               {currentSession.exerciseOrder.map((exId, idx) => {
                 const ex = exerciseMap.get(exId);
                 if (!ex) return null;
-                const setsForEx = sessionSets.filter((s) => s.exerciseId === exId);
+                const setsForEx = sessionSets.filter(
+                  (s) => s.exerciseId === exId
+                );
                 const doneCnt = setsForEx.filter((s) => s.isCompleted).length;
                 const isSelected = selectedExerciseId === exId;
                 return (
@@ -746,7 +923,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         </>
       )}
 
-      {/* Native Dialog 1: Exercise Picker (Light-Dismiss enabled) */}
+      {/* Native Dialog 1: Exercise Picker */}
       <dialog
         ref={pickerDialogRef}
         {...({ closedby: 'any' } as React.DialogHTMLAttributes<HTMLDialogElement>)}
@@ -779,22 +956,22 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
           </div>
 
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {(['all', 'chest', 'back', 'legs', 'shoulders', 'arms', 'core'] as const).map(
-              (m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setPickerMuscle(m)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer ${
-                    pickerMuscle === m
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  {m === 'all' ? '全部' : MUSCLE_LABELS[m]}
-                </button>
-              )
-            )}
+            {(
+              ['all', 'chest', 'back', 'legs', 'shoulders', 'arms', 'core'] as const
+            ).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setPickerMuscle(m)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer ${
+                  pickerMuscle === m
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-slate-800 text-slate-300'
+                }`}
+              >
+                {m === 'all' ? '全部' : MUSCLE_LABELS[m]}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -809,7 +986,8 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
               <div>
                 <div className="text-sm font-bold text-white">{ex.name}</div>
                 <div className="text-[11px] text-slate-400">
-                  {MUSCLE_LABELS[ex.primaryMuscle]} · {EQUIPMENT_LABELS[ex.equipment]}
+                  {MUSCLE_LABELS[ex.primaryMuscle]} ·{' '}
+                  {EQUIPMENT_LABELS[ex.equipment]}
                 </div>
               </div>
               <span className="text-xs font-bold text-emerald-400">+ 添加</span>
@@ -818,7 +996,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         </div>
       </dialog>
 
-      {/* Native Dialog 2: Finish Workout Confirmation (Light-Dismiss enabled) */}
+      {/* Native Dialog 2: Finish Workout Confirmation */}
       <dialog
         ref={finishDialogRef}
         {...({ closedby: 'any' } as React.DialogHTMLAttributes<HTMLDialogElement>)}
@@ -827,7 +1005,10 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 id="finish-dialog-title" className="text-base font-extrabold text-white">
+            <h3
+              id="finish-dialog-title"
+              className="text-base font-extrabold text-white"
+            >
               完成今日训练
             </h3>
             <button
@@ -836,7 +1017,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
               className="p-1 text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-5 h-5" />
-            </button>
+          </button>
           </div>
 
           <div className="grid grid-cols-3 gap-2 text-center bg-slate-950 p-3 rounded-xl border border-slate-800">
@@ -848,7 +1029,9 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
             </div>
             <div>
               <div className="text-[11px] text-slate-400">完成组数</div>
-              <div className="text-sm font-bold text-emerald-400">{completedCount} 组</div>
+              <div className="text-sm font-bold text-emerald-400">
+                {completedCount} 组
+              </div>
             </div>
             <div>
               <div className="text-[11px] text-slate-400">总容量</div>
@@ -856,15 +1039,30 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
             </div>
           </div>
 
+          {routineHasChanged && associatedRoutine && (
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={syncBackToRoutine}
+                onChange={(e) => setSyncBackToRoutine(e.target.checked)}
+                className="mt-0.5 rounded"
+              />
+              <span className="text-xs text-emerald-200 leading-relaxed">
+                将本次训练的动作顺序与组数变更同步更新回计划模板
+                <strong className="text-white">「{associatedRoutine.name}」</strong>
+              </span>
+            </label>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-slate-300 mb-1.5">
-              训练备注 / 今日状态 (可选)
+              训练感悟总结 (可选)
             </label>
             <textarea
               rows={2}
               value={feelingInput}
               onChange={(e) => setFeelingInput(e.target.value)}
-              placeholder="例如：状态不错，卧推突破重量！"
+              placeholder="例如：器械宽距高位下拉变轻松了呢！"
               className="w-full rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
             />
           </div>

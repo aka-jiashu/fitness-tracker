@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Scale,
   Calendar,
+  Trophy,
 } from 'lucide-react';
 import {
   db,
@@ -25,8 +26,43 @@ import {
   importBackupJson,
   resetToFactoryDefaults,
 } from '../db/database';
-import { BackupPayload, BodyMetric } from '../types/fitness';
+import { BackupPayload, BodyMetric, WorkoutSet } from '../types/fitness';
 import { formatDuration } from '../utils/fitnessUtils';
+
+/**
+ * 将同动作下的连续相同重量×次数的组聚合为易读格式 (如 35lb×12×2)
+ */
+function summarizeSetsReadable(sets: WorkoutSet[]): string {
+  if (sets.length === 0) return '';
+  const groups: Array<{ w: number; u: string; r: number; c: number; skip?: boolean }> = [];
+  for (const s of sets) {
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.w === s.weight &&
+      last.u === s.unit &&
+      last.r === s.reps &&
+      Boolean(last.skip) === Boolean(s.isSkipped)
+    ) {
+      last.c += 1;
+    } else {
+      groups.push({
+        w: s.weight,
+        u: s.unit,
+        r: s.reps,
+        c: 1,
+        skip: s.isSkipped,
+      });
+    }
+  }
+  return groups
+    .map((g) => {
+      const weightLabel = g.w === 0 ? '空' : `${g.w}${g.u}`;
+      const base = `${weightLabel}×${g.r}×${g.c}`;
+      return g.skip ? `${base} (未做)` : base;
+    })
+    .join('  ');
+}
 
 export const AnalyticsTab: React.FC = () => {
   const sessions =
@@ -44,7 +80,10 @@ export const AnalyticsTab: React.FC = () => {
   const bodyMetrics =
     useLiveQuery(() => db.bodyMetrics.orderBy('date').toArray(), []) || [];
 
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const [chartMode, setChartMode] = useState<'volume' | 'weight'>('volume');
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(
+    null
+  );
   const [weightInput, setWeightInput] = useState('');
   const [bodyFatInput, setBodyFatInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -63,18 +102,25 @@ export const AnalyticsTab: React.FC = () => {
     ) / 10;
   const latestMetric = bodyMetrics[bodyMetrics.length - 1];
 
-  // Volume trend data (chronological)
+  // Volume trend data (chronological, up to last 20 sessions)
   const volumeChartData = [...sessions]
     .reverse()
-    .slice(-12)
+    .slice(-20)
     .map((s) => {
       const d = new Date(s.startTime);
       return {
         date: `${d.getMonth() + 1}/${d.getDate()}`,
-        volume: s.totalVolumeKg,
-        name: s.name,
+        value: s.totalVolumeKg,
+        label: s.name,
       };
     });
+
+  // Weight trend data
+  const weightChartData = bodyMetrics.slice(-15).map((bm) => ({
+    date: bm.date.slice(5),
+    value: bm.weightKg || 0,
+    bodyFat: bm.bodyFatRate,
+  }));
 
   const handleAddBodyMetric = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,16 +139,21 @@ export const AnalyticsTab: React.FC = () => {
     await db.bodyMetrics.put(record);
     setWeightInput('');
     setBodyFatInput('');
+    setChartMode('weight');
     setStatusMessage('已记录今日体重体征');
     setTimeout(() => setStatusMessage(null), 2500);
   };
 
   const handleDeleteSession = async (sessionId: string, name: string) => {
     if (!window.confirm(`确定删除训练记录「${name}」吗？`)) return;
-    await db.transaction('rw', [db.workoutSessions, db.workoutSets], async () => {
-      await db.workoutSets.where('sessionId').equals(sessionId).delete();
-      await db.workoutSessions.delete(sessionId);
-    });
+    await db.transaction(
+      'rw',
+      [db.workoutSessions, db.workoutSets],
+      async () => {
+        await db.workoutSets.where('sessionId').equals(sessionId).delete();
+        await db.workoutSessions.delete(sessionId);
+      }
+    );
   };
 
   const handleExportBackup = async () => {
@@ -139,17 +190,16 @@ export const AnalyticsTab: React.FC = () => {
   };
 
   const handleResetAll = async () => {
-    if (
-      !window.confirm(
-        '确定恢复出厂演示数据吗？当前自定义记录将被重置。'
-      )
-    ) {
+    if (!window.confirm('确定恢复预置的 35 场真实训练日志与 5 套专属计划吗？')) {
       return;
     }
     await resetToFactoryDefaults();
-    setStatusMessage('已恢复出厂默认数据');
+    setStatusMessage('已恢复完整预置训练日志与计划');
     setTimeout(() => setStatusMessage(null), 2500);
   };
+
+  const activeChartData =
+    chartMode === 'volume' ? volumeChartData : weightChartData;
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -164,130 +214,172 @@ export const AnalyticsTab: React.FC = () => {
         <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
           <div className="text-[11px] text-slate-400">累计打卡</div>
           <div className="text-xl font-extrabold text-white mt-0.5">
-            {totalWorkouts} <span className="text-xs font-normal text-slate-400">次</span>
+            {totalWorkouts}{' '}
+            <span className="text-xs font-normal text-slate-400">场</span>
           </div>
         </div>
         <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
           <div className="text-[11px] text-slate-400">累计总容量</div>
           <div className="text-xl font-extrabold text-emerald-400 mt-0.5">
-            {totalVolumeTons} <span className="text-xs font-normal text-slate-400">吨</span>
+            {totalVolumeTons}{' '}
+            <span className="text-xs font-normal text-slate-400">吨</span>
           </div>
         </div>
         <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
           <div className="text-[11px] text-slate-400">最新体重</div>
           <div className="text-xl font-extrabold text-white mt-0.5">
             {latestMetric?.weightKg ?? '--'}{' '}
-            <span className="text-xs font-normal text-slate-400">kg</span>
+            <span className="text-xs font-normal text-slate-400">
+              kg
+              {latestMetric?.bodyFatRate
+                ? ` · ${latestMetric.bodyFatRate}%`
+                : ''}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Volume Trend Chart */}
-      {volumeChartData.length > 1 && (
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white">训练容量趋势 (kg)</h2>
-            <span className="text-[11px] text-slate-400">最近 {volumeChartData.length} 次</span>
-          </div>
-          <div className="h-44 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={volumeChartData}>
-                <defs>
-                  <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  stroke="#64748b"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="#64748b"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  width={42}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#0f172a',
-                    borderColor: '#334155',
-                    borderRadius: '0.75rem',
-                    fontSize: '12px',
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="volume"
-                  name="训练容量 (kg)"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  fill="url(#volGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+      {/* Dual-Mode Trend Chart + Quick Weight Entry */}
+      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-white">
+            {chartMode === 'volume'
+              ? '单场训练容量趋势 (kg)'
+              : '身体体重变化走势 (kg)'}
+          </h2>
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setChartMode('volume')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                chartMode === 'volume'
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              训练容量
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartMode('weight')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                chartMode === 'weight'
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              体重走势
+            </button>
           </div>
         </div>
-      )}
 
-      {/* Quick Body Weight Entry */}
-      <form
-        onSubmit={handleAddBodyMetric}
-        className="rounded-2xl bg-slate-900 border border-slate-800 p-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3"
-      >
-        <div className="flex items-center gap-2">
-          <Scale className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span className="text-xs font-bold text-white">快速记录今日体重</span>
+        <div className="h-44 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={activeChartData}>
+              <defs>
+                <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#1e293b"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="date"
+                stroke="#64748b"
+                fontSize={11}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                stroke="#64748b"
+                fontSize={11}
+                tickLine={false}
+                axisLine={false}
+                width={42}
+                domain={chartMode === 'weight' ? ['dataMin - 2', 'dataMax + 2'] : ['auto', 'auto']}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#0f172a',
+                  borderColor: '#334155',
+                  borderRadius: '0.75rem',
+                  fontSize: '12px',
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                name={chartMode === 'volume' ? '容量 (kg)' : '体重 (kg)'}
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="url(#trendGrad)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="number"
-            step="0.1"
-            required
-            value={weightInput}
-            onChange={(e) => setWeightInput(e.target.value)}
-            placeholder="体重 (kg)"
-            className="w-28 rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-          />
-          <input
-            type="number"
-            step="0.1"
-            value={bodyFatInput}
-            onChange={(e) => setBodyFatInput(e.target.value)}
-            placeholder="体脂 % (选填)"
-            className="w-28 rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-          />
-          <button
-            type="submit"
-            className="touch-target px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>记录</span>
-          </button>
-        </div>
-      </form>
+
+        {/* Inline Quick Body Weight Entry */}
+        <form
+          onSubmit={handleAddBodyMetric}
+          className="pt-3 border-t border-slate-800/80 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5"
+        >
+          <div className="flex items-center gap-2">
+            <Scale className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-xs font-bold text-slate-300">
+              记录今日体重
+            </span>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="number"
+              step="0.1"
+              required
+              value={weightInput}
+              onChange={(e) => setWeightInput(e.target.value)}
+              placeholder="体重 (kg)"
+              className="w-28 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+            />
+            <input
+              type="number"
+              step="0.1"
+              value={bodyFatInput}
+              onChange={(e) => setBodyFatInput(e.target.value)}
+              placeholder="体脂 % (选填)"
+              className="w-28 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+            />
+            <button
+              type="submit"
+              className="touch-target px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>记录</span>
+            </button>
+          </div>
+        </form>
+      </div>
 
       {/* Workout History List */}
       <div className="space-y-2.5">
         <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-          历史训练日志 ({sessions.length})
+          历史训练日志 ({sessions.length} 场)
         </h2>
 
         {sessions.map((session) => {
           const isExpanded = expandedSessionId === session.id;
-          const setsForSession = allSets
-            .filter((s) => s.sessionId === session.id && s.isCompleted)
+          const allSetsForSession = allSets
+            .filter((s) => s.sessionId === session.id)
             .sort((a, b) => a.setOrder - b.setOrder);
-          const dateStr = new Date(session.startTime).toLocaleDateString('zh-CN', {
-            month: 'short',
-            day: 'numeric',
-            weekday: 'short',
-          });
+          const completedSets = allSetsForSession.filter((s) => s.isCompleted);
+          const prCount = completedSets.filter((s) => s.isPR).length;
+
+          const d = new Date(session.startTime);
+          const dateStr = `${d.getFullYear()}-${String(
+            d.getMonth() + 1
+          ).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
           return (
             <div
@@ -298,24 +390,34 @@ export const AnalyticsTab: React.FC = () => {
                 <button
                   type="button"
                   aria-expanded={isExpanded}
-                  onClick={() => setExpandedSessionId(isExpanded ? null : session.id)}
+                  onClick={() =>
+                    setExpandedSessionId(isExpanded ? null : session.id)
+                  }
                   className="flex-1 text-left flex items-center justify-between gap-2 cursor-pointer"
                 >
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{session.name}</span>
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-white">
+                        {session.name}
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {dateStr}
                       </span>
+                      {prCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold flex items-center gap-0.5">
+                          <Trophy className="w-3 h-3" /> {prCount} PR
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono">
                       用时 {formatDuration(session.durationSeconds)} · 完成{' '}
-                      {setsForSession.length} 组 · 总量 {session.totalVolumeKg} kg
+                      {completedSets.length} 组 · 总量 {session.totalVolumeKg}{' '}
+                      kg
                     </div>
                   </div>
                   <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform ${
+                    className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${
                       isExpanded ? 'rotate-180 text-emerald-400' : ''
                     }`}
                   />
@@ -339,24 +441,40 @@ export const AnalyticsTab: React.FC = () => {
 
               <div
                 className={`expandable-panel ${
-                  isExpanded ? 'is-expanded mt-3 pt-3 border-t border-slate-800/80' : ''
+                  isExpanded
+                    ? 'is-expanded mt-3 pt-3 border-t border-slate-800/80'
+                    : ''
                 }`}
                 hidden={!isExpanded}
               >
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {session.exerciseOrder.map((exId) => {
-                    const exSets = setsForSession.filter((s) => s.exerciseId === exId);
+                    const exSets = allSetsForSession.filter(
+                      (s) => s.exerciseId === exId
+                    );
                     if (exSets.length === 0) return null;
+                    const allSkipped = exSets.every((s) => s.isSkipped);
+                    const exNote = session.exerciseNotes?.[exId];
+
                     return (
                       <div
                         key={exId}
-                        className="flex flex-wrap items-baseline justify-between gap-2 text-xs py-1"
+                        className={`flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 text-xs py-1 ${
+                          allSkipped ? 'opacity-50' : ''
+                        }`}
                       >
-                        <span className="font-bold text-slate-200">
-                          {exerciseMap.get(exId) || exId}
-                        </span>
-                        <span className="font-mono text-slate-400">
-                          {exSets.map((s) => `${s.weight}${s.unit}×${s.reps}`).join(' / ')}
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-200">
+                            {exerciseMap.get(exId) || exId}
+                          </span>
+                          {exNote && (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                              {exNote}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono text-slate-300">
+                          {summarizeSetsReadable(exSets)}
                         </span>
                       </div>
                     );
@@ -405,7 +523,7 @@ export const AnalyticsTab: React.FC = () => {
             type="button"
             onClick={handleResetAll}
             className="touch-target px-3 py-2 rounded-xl bg-slate-800/70 hover:bg-rose-950/50 text-xs font-bold text-slate-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
-            title="重置为出厂数据"
+            title="恢复预置真实日志与计划"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>重置</span>
