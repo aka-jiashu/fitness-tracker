@@ -1,4 +1,4 @@
-import { WeightUnit, WorkoutSet } from '../types/fitness';
+import { WeightUnit, WorkoutSession, WorkoutSet } from '../types/fitness';
 
 export const LB_TO_KG = 0.45359237;
 export const KG_TO_LB = 2.20462262;
@@ -82,19 +82,20 @@ export interface ProgressionRecommendation {
 }
 
 /**
- * 评估动作进阶资格：统计该动作在当前训练及历史训练中已完成组的 5 星评分 (rating === 5) 累计次数。
- * 当累计获得至少 2 次 5 星时，判定具备渐进超负荷进阶条件。
+ * 评估动作进阶资格：统计该动作在历史已完成会话及当前进行中会话中，获得 5 星达成度评分 (exerciseRatings[exerciseId] === 5) 的累计次数。
+ * 当累计获得至少 2 次 5 星评分时，判定具备渐进超负荷进阶条件。
  */
 export function evaluateExerciseProgression(
-  sets: WorkoutSet[],
+  sessions: WorkoutSession[],
+  exerciseId: string,
   defaultUnit: WeightUnit = 'lb'
 ): ProgressionRecommendation {
-  const fiveStarCount = sets.filter(
-    (s) => s.isCompleted && !s.isSkipped && s.rating === 5
+  const fiveStarCount = sessions.filter(
+    (s) => s.exerciseRatings?.[exerciseId] === 5
   ).length;
   const isReady = fiveStarCount >= 2;
   const suggestedDeltaWeight = defaultUnit === 'lb' ? 5 : 2.5;
-  const deltaLabel = defaultUnit === 'lb' ? '+5lb / +2.5kg' : '+2.5kg / +5lb';
+  const deltaLabel = defaultUnit === 'lb' ? '+5lb/+2.5kg' : '+2.5kg/+5lb';
 
   return {
     isReady,
@@ -102,7 +103,7 @@ export function evaluateExerciseProgression(
     suggestedDeltaWeight,
     unit: defaultUnit,
     message: isReady
-      ? `🌟 累计${fiveStarCount}次满星达成！建议下一次提升重量(${deltaLabel})或增加组数`
+      ? `🌟 累计 ${fiveStarCount} 次满星！该动作已轻松掌握，建议下次提升重量(${deltaLabel})或增加组数`
       : '',
   };
 }

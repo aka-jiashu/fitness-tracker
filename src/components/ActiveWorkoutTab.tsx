@@ -60,11 +60,10 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
   onStartRestTimer,
   onNavigateToRoutines,
 }) => {
-  const activeSessions = useLiveQuery(
-    () => db.workoutSessions.filter((s) => !s.isFinished).toArray(),
-    []
+  const allSessions = useLiveQuery(() => db.workoutSessions.toArray(), []) || [];
+  const currentSession: WorkoutSession | undefined = allSessions.find(
+    (s) => !s.isFinished
   );
-  const currentSession: WorkoutSession | undefined = activeSessions?.[0];
 
   const allExercises = useLiveQuery(() => db.exercises.toArray(), []) || [];
   const allRoutines = useLiveQuery(() => db.routines.toArray(), []) || [];
@@ -78,18 +77,13 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
       [currentSession?.id]
     ) || [];
 
-  const allCompletedExerciseSets =
-    useLiveQuery(
-      () =>
-        currentSession && currentSession.exerciseOrder.length > 0
-          ? db.workoutSets
-              .where('exerciseId')
-              .anyOf(currentSession.exerciseOrder)
-              .filter((s) => s.isCompleted && !s.isSkipped)
-              .toArray()
-          : Promise.resolve([] as WorkoutSet[]),
-      [currentSession?.id, currentSession?.exerciseOrder.join(',')]
-    ) || [];
+  const eligibleSessionsForProgression = React.useMemo(
+    () =>
+      allSessions.filter(
+        (s) => s.isFinished || (currentSession && s.id === currentSession.id)
+      ),
+    [allSessions, currentSession]
+  );
 
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(
     null
@@ -404,9 +398,17 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     });
   };
 
-  const handleRateSet = async (set: WorkoutSet, star: number) => {
-    const nextRating = set.rating === star ? undefined : star;
-    await db.workoutSets.update(set.id, { rating: nextRating });
+  const handleRateExercise = async (exerciseId: string, star: number) => {
+    if (!currentSession) return;
+    const nextRatings = { ...(currentSession.exerciseRatings || {}) };
+    if (nextRatings[exerciseId] === star) {
+      delete nextRatings[exerciseId];
+    } else {
+      nextRatings[exerciseId] = star;
+    }
+    await db.workoutSessions.update(currentSession.id, {
+      exerciseRatings: nextRatings,
+    });
   };
 
   const handleApplyWeightProgression = async (
@@ -627,10 +629,20 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
     const stepDelta = unit === 'lb' ? 5 : 2.5;
     const currentNote = currentSession.exerciseNotes?.[exerciseId] || '';
     const isNoteOpen = Boolean(openNoteExIds[exerciseId] || currentNote);
-    const allSetsForExercise = allCompletedExerciseSets.filter(
-      (s) => s.exerciseId === exerciseId
+    const allSetsDone = exSets.length > 0 && exSets.every((s) => s.isCompleted);
+    const currentExerciseRating = currentSession.exerciseRatings?.[exerciseId];
+    const progression = evaluateExerciseProgression(
+      eligibleSessionsForProgression,
+      exerciseId,
+      unit
     );
-    const progression = evaluateExerciseProgression(allSetsForExercise, unit);
+    const ratingLabels = [
+      '1星: 极吃力/未达标',
+      '2星: 偏吃力',
+      '3星: 适中达标',
+      '4星: 较轻松',
+      '5星: 非常轻松/完美达成',
+    ];
 
     return (
       <div
@@ -747,187 +759,178 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
         <div className="space-y-2">
           {exSets.map((set, idx) => {
             const meta = SET_TYPE_META[set.setType];
-            const ratingLabels = [
-              '1星: 极吃力/未达标',
-              '2星: 偏吃力',
-              '3星: 适中达标',
-              '4星: 较轻松',
-              '5星: 非常轻松/完美达成',
-            ];
             return (
               <div
                 key={set.id}
-                className={`rounded-xl p-2.5 border transition space-y-2 ${
+                className={`rounded-xl p-2.5 border transition flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 ${
                   set.isCompleted
                     ? 'bg-emerald-950/25 border-emerald-500/30'
                     : 'bg-slate-950/60 border-slate-800/80'
                 }`}
               >
-                <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
-                  {/* Set index & type */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleCycleSetType(set)}
-                      className={`w-8 h-8 rounded-lg text-xs font-extrabold border flex items-center justify-center cursor-pointer ${meta.color}`}
-                      title={`点击切换组类型 (当前: ${meta.label})`}
-                    >
-                      {set.setType === 'normal' ? idx + 1 : meta.short}
-                    </button>
-                    {set.isPR && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold flex items-center gap-0.5">
-                        <Trophy className="w-3 h-3" /> PR
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Weight Stepper */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleStepWeight(set, -stepDelta)}
-                      className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
-                      aria-label="减少重量"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <div className="w-18 text-center">
-                      <input
-                        type="number"
-                        step="0.5"
-                        value={set.weight}
-                        onChange={(e) =>
-                          db.workoutSets.update(set.id, {
-                            weight: Math.max(
-                              0,
-                              parseFloat(e.target.value) || 0
-                            ),
-                          })
-                        }
-                        className="w-full text-center bg-transparent text-base font-extrabold text-white focus:outline-none"
-                      />
-                      <div className="text-[10px] text-slate-400 -mt-1">
-                        {set.unit}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleStepWeight(set, stepDelta)}
-                      className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
-                      aria-label="增加重量"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Reps Stepper */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleStepReps(set, -1)}
-                      className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
-                      aria-label="减少次数"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <div className="w-14 text-center">
-                      <input
-                        type="number"
-                        value={set.reps}
-                        onChange={(e) =>
-                          db.workoutSets.update(set.id, {
-                            reps: Math.max(1, parseInt(e.target.value, 10) || 1),
-                          })
-                        }
-                        className="w-full text-center bg-transparent text-base font-extrabold text-white focus:outline-none"
-                      />
-                      <div className="text-[10px] text-slate-400 -mt-1">次</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleStepReps(set, 1)}
-                      className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
-                      aria-label="增加次数"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Check & Delete */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleCompleteSet(set, exercise)}
-                      className={`touch-target px-3.5 h-10 rounded-xl font-bold text-xs flex items-center gap-1 transition cursor-pointer ${
-                        set.isCompleted
-                          ? 'bg-emerald-500 text-slate-950'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                      }`}
-                    >
-                      <Check className="w-4 h-4 stroke-[2.5]" />
-                      <span>{set.isCompleted ? '已完成' : '完成'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSet(set)}
-                      className="w-8 h-10 rounded-xl text-slate-500 hover:text-rose-400 flex items-center justify-center cursor-pointer"
-                      title="删除该组"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                {/* Set index & type */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleCycleSetType(set)}
+                    className={`w-8 h-8 rounded-lg text-xs font-extrabold border flex items-center justify-center cursor-pointer ${meta.color}`}
+                    title={`点击切换组类型 (当前: ${meta.label})`}
+                  >
+                    {set.setType === 'normal' ? idx + 1 : meta.short}
+                  </button>
+                  {set.isPR && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold flex items-center gap-0.5">
+                      <Trophy className="w-3 h-3" /> PR
+                    </span>
+                  )}
                 </div>
 
-                {/* 1~5 Star Rating Bar (shown when set is completed or already rated) */}
-                {(set.isCompleted || (set.rating && set.rating > 0)) && (
-                  <div className="pt-1.5 border-t border-slate-800/70 flex items-center justify-between gap-2 text-[11px]">
-                    <span className="text-slate-400 font-medium">
-                      本组达成度评分:
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => {
-                        const isActive = (set.rating || 0) >= star;
-                        return (
-                          <button
-                            key={star}
-                            type="button"
-                            onClick={() => handleRateSet(set, star)}
-                            title={ratingLabels[star - 1]}
-                            aria-label={ratingLabels[star - 1]}
-                            className={`p-1 rounded-md transition cursor-pointer ${
-                              isActive
-                                ? 'text-amber-400 hover:text-amber-300 scale-105'
-                                : 'text-slate-600 hover:text-slate-400'
-                            }`}
-                          >
-                            <Star
-                              className={`w-4 h-4 ${
-                                isActive ? 'fill-amber-400 text-amber-400' : ''
-                              }`}
-                            />
-                          </button>
-                        );
-                      })}
-                      {set.rating ? (
-                        <span className="ml-1 text-[10px] font-bold text-amber-300/90">
-                          {set.rating === 5
-                            ? '轻松满星'
-                            : set.rating === 1
-                            ? '吃力'
-                            : `${set.rating}星`}
-                        </span>
-                      ) : (
-                        <span className="ml-1 text-[10px] text-slate-500">
-                          点击评星
-                        </span>
-                      )}
+                {/* Weight Stepper */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleStepWeight(set, -stepDelta)}
+                    className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
+                    aria-label="减少重量"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <div className="w-18 text-center">
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={set.weight}
+                      onChange={(e) =>
+                        db.workoutSets.update(set.id, {
+                          weight: Math.max(
+                            0,
+                            parseFloat(e.target.value) || 0
+                          ),
+                        })
+                      }
+                      className="w-full text-center bg-transparent text-base font-extrabold text-white focus:outline-none"
+                    />
+                    <div className="text-[10px] text-slate-400 -mt-1">
+                      {set.unit}
                     </div>
                   </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => handleStepWeight(set, stepDelta)}
+                    className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
+                    aria-label="增加重量"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Reps Stepper */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleStepReps(set, -1)}
+                    className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
+                    aria-label="减少次数"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <div className="w-14 text-center">
+                    <input
+                      type="number"
+                      value={set.reps}
+                      onChange={(e) =>
+                        db.workoutSets.update(set.id, {
+                          reps: Math.max(1, parseInt(e.target.value, 10) || 1),
+                        })
+                      }
+                      className="w-full text-center bg-transparent text-base font-extrabold text-white focus:outline-none"
+                    />
+                    <div className="text-[10px] text-slate-400 -mt-1">次</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleStepReps(set, 1)}
+                    className="touch-target w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer"
+                    aria-label="增加次数"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Check & Delete */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleCompleteSet(set, exercise)}
+                    className={`touch-target px-3.5 h-10 rounded-xl font-bold text-xs flex items-center gap-1 transition cursor-pointer ${
+                      set.isCompleted
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                    }`}
+                  >
+                    <Check className="w-4 h-4 stroke-[2.5]" />
+                    <span>{set.isCompleted ? '已完成' : '完成'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSet(set)}
+                    className="w-8 h-10 rounded-xl text-slate-500 hover:text-rose-400 flex items-center justify-center cursor-pointer"
+                    title="删除该组"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
+
+        {/* Exercise Overall 1~5 Star Completion Rating Bar (shown when all sets of this exercise are completed) */}
+        {allSetsDone && (
+          <div className="rounded-xl bg-slate-950/80 border border-emerald-500/30 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-bold text-emerald-300">
+              动作已全部做完，请评估达成度：
+            </span>
+            <div className="flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((star) => {
+                const isActive = (currentExerciseRating || 0) >= star;
+                return (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => handleRateExercise(exerciseId, star)}
+                    title={ratingLabels[star - 1]}
+                    aria-label={ratingLabels[star - 1]}
+                    className={`p-1.5 rounded-lg transition cursor-pointer ${
+                      isActive
+                        ? 'text-amber-400 hover:text-amber-300 scale-105'
+                        : 'text-slate-600 hover:text-slate-400'
+                    }`}
+                  >
+                    <Star
+                      className={`w-4 h-4 ${
+                        isActive ? 'fill-amber-400 text-amber-400' : ''
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+              {currentExerciseRating ? (
+                <span className="ml-1.5 text-xs font-extrabold text-amber-300">
+                  {currentExerciseRating === 5
+                    ? '轻松满星 ✨'
+                    : currentExerciseRating === 1
+                    ? '吃力'
+                    : `${currentExerciseRating} 星`}
+                </span>
+              ) : (
+                <span className="ml-1.5 text-[11px] text-slate-500">
+                  点击评星
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Add Set Button */}
         <button
