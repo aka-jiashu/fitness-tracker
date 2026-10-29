@@ -70,6 +70,7 @@ export interface WorkoutSet {
   unit: WeightUnit;               // 本组单位 ('kg' | 'lb')
   reps: number;                   // 完成次数
   rpe?: number;                   // 主观疲劳度 (1-10)
+  rating?: number;                // 1~5 星达成度评分 (1=极吃力/未达标, 5=非常轻松/完美达成)
   isCompleted: boolean;           // 是否打勾完成
   isSkipped?: boolean;            // 是否跳过未做
   isPR?: boolean;                 // 是否打破个人历史最好成绩

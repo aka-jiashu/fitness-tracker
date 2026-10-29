@@ -72,3 +72,37 @@ export function formatDuration(seconds: number): string {
   }
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
+
+export interface ProgressionRecommendation {
+  isReady: boolean;
+  fiveStarCount: number;
+  suggestedDeltaWeight: number;
+  unit: WeightUnit;
+  message: string;
+}
+
+/**
+ * 评估动作进阶资格：统计该动作在当前训练及历史训练中已完成组的 5 星评分 (rating === 5) 累计次数。
+ * 当累计获得至少 2 次 5 星时，判定具备渐进超负荷进阶条件。
+ */
+export function evaluateExerciseProgression(
+  sets: WorkoutSet[],
+  defaultUnit: WeightUnit = 'lb'
+): ProgressionRecommendation {
+  const fiveStarCount = sets.filter(
+    (s) => s.isCompleted && !s.isSkipped && s.rating === 5
+  ).length;
+  const isReady = fiveStarCount >= 2;
+  const suggestedDeltaWeight = defaultUnit === 'lb' ? 5 : 2.5;
+  const deltaLabel = defaultUnit === 'lb' ? '+5lb / +2.5kg' : '+2.5kg / +5lb';
+
+  return {
+    isReady,
+    fiveStarCount,
+    suggestedDeltaWeight,
+    unit: defaultUnit,
+    message: isReady
+      ? `🌟 累计${fiveStarCount}次满星达成！建议下一次提升重量(${deltaLabel})或增加组数`
+      : '',
+  };
+}
