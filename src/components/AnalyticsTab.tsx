@@ -4,6 +4,8 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -26,8 +28,30 @@ import {
   importBackupJson,
   resetToFactoryDefaults,
 } from '../db/database';
-import { BackupPayload, BodyMetric, WorkoutSet } from '../types/fitness';
-import { formatDuration } from '../utils/fitnessUtils';
+import { BackupPayload, BodyMetric, Exercise, WorkoutSet } from '../types/fitness';
+import { calculateSetVolumeKg, formatDuration } from '../utils/fitnessUtils';
+
+const VOLUME_MUSCLE_SERIES = [
+  { key: 'chest', label: '胸部', color: '#10b981' },
+  { key: 'back', label: '背部', color: '#0ea5e9' },
+  { key: 'legs', label: '臀腿', color: '#f59e0b' },
+  { key: 'shoulders', label: '肩部', color: '#a855f7' },
+  { key: 'arms', label: '手臂', color: '#f43f5e' },
+] as const;
+
+type VolumeMuscleKey = (typeof VOLUME_MUSCLE_SERIES)[number]['key'];
+
+interface VolumeChartDataPoint {
+  date: string;
+  fullDate: string;
+  sessionName: string;
+  totalVolumeKg: number;
+  chest?: number;
+  back?: number;
+  legs?: number;
+  shoulders?: number;
+  arms?: number;
+}
 
 /**
  * 将同动作下的连续相同重量×次数的组聚合为易读格式 (如 35lb×12×2)
@@ -81,6 +105,15 @@ export const AnalyticsTab: React.FC = () => {
     useLiveQuery(() => db.bodyMetrics.orderBy('date').toArray(), []) || [];
 
   const [chartMode, setChartMode] = useState<'volume' | 'weight'>('volume');
+  const [visibleMuscles, setVisibleMuscles] = useState<
+    Record<VolumeMuscleKey, boolean>
+  >({
+    chest: true,
+    back: true,
+    legs: true,
+    shoulders: true,
+    arms: true,
+  });
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(
     null
   );
@@ -95,6 +128,25 @@ export const AnalyticsTab: React.FC = () => {
     return map;
   }, [allExercises]);
 
+  const exerciseObjMap = React.useMemo(() => {
+    const map = new Map<string, Exercise>();
+    allExercises.forEach((e) => map.set(e.id, e));
+    return map;
+  }, [allExercises]);
+
+  const setsBySessionMap = React.useMemo(() => {
+    const map = new Map<string, WorkoutSet[]>();
+    for (const s of allSets) {
+      const list = map.get(s.sessionId);
+      if (list) {
+        list.push(s);
+      } else {
+        map.set(s.sessionId, [s]);
+      }
+    }
+    return map;
+  }, [allSets]);
+
   const totalWorkouts = sessions.length;
   const totalVolumeTons =
     Math.round(
@@ -102,18 +154,68 @@ export const AnalyticsTab: React.FC = () => {
     ) / 10;
   const latestMetric = bodyMetrics[bodyMetrics.length - 1];
 
-  // Volume trend data (chronological, up to last 20 sessions)
-  const volumeChartData = [...sessions]
-    .reverse()
-    .slice(-20)
-    .map((s) => {
-      const d = new Date(s.startTime);
-      return {
-        date: `${d.getMonth() + 1}/${d.getDate()}`,
-        value: s.totalVolumeKg,
-        label: s.name,
-      };
+  // Volume trend data by primary muscle group (chronological, up to last 30 sessions)
+  const volumeChartData: VolumeChartDataPoint[] = React.useMemo(() => {
+    return [...sessions]
+      .reverse()
+      .slice(-30)
+      .map((s) => {
+        const d = new Date(s.startTime);
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        const fullDate = `${d.getFullYear()}-${String(month).padStart(
+          2,
+          '0'
+        )}-${String(day).padStart(2, '0')}`;
+
+        const muscleVolumes: Record<VolumeMuscleKey, number> = {
+          chest: 0,
+          back: 0,
+          legs: 0,
+          shoulders: 0,
+          arms: 0,
+        };
+
+        const sessionSets = setsBySessionMap.get(s.id) || [];
+        for (const set of sessionSets) {
+          if (!set.isCompleted || set.isSkipped) continue;
+          const ex = exerciseObjMap.get(set.exerciseId);
+          const muscle = ex?.primaryMuscle;
+          if (muscle && muscle in muscleVolumes) {
+            muscleVolumes[muscle as VolumeMuscleKey] += calculateSetVolumeKg(set);
+          }
+        }
+
+        return {
+          date: `${month}/${day}`,
+          fullDate,
+          sessionName: s.name,
+          totalVolumeKg: s.totalVolumeKg,
+          chest:
+            muscleVolumes.chest > 0
+              ? Math.round(muscleVolumes.chest)
+              : undefined,
+          back:
+            muscleVolumes.back > 0 ? Math.round(muscleVolumes.back) : undefined,
+          legs:
+            muscleVolumes.legs > 0 ? Math.round(muscleVolumes.legs) : undefined,
+          shoulders:
+            muscleVolumes.shoulders > 0
+              ? Math.round(muscleVolumes.shoulders)
+              : undefined,
+          arms:
+            muscleVolumes.arms > 0 ? Math.round(muscleVolumes.arms) : undefined,
+        };
+      });
+  }, [sessions, setsBySessionMap, exerciseObjMap]);
+
+  const toggleMuscleSeries = (key: VolumeMuscleKey) => {
+    setVisibleMuscles((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      const anyVisible = Object.values(next).some(Boolean);
+      return anyVisible ? next : prev;
     });
+  };
 
   // Weight trend data
   const weightChartData = bodyMetrics.slice(-15).map((bm) => ({
@@ -198,9 +300,6 @@ export const AnalyticsTab: React.FC = () => {
     setTimeout(() => setStatusMessage(null), 2500);
   };
 
-  const activeChartData =
-    chartMode === 'volume' ? volumeChartData : weightChartData;
-
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       {statusMessage && (
@@ -240,14 +339,21 @@ export const AnalyticsTab: React.FC = () => {
       </div>
 
       {/* Dual-Mode Trend Chart + Quick Weight Entry */}
-      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-4">
+      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-3.5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-white">
-            {chartMode === 'volume'
-              ? '单场训练容量趋势 (kg)'
-              : '身体体重变化走势 (kg)'}
-          </h2>
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <div>
+            <h2 className="text-sm font-bold text-white">
+              {chartMode === 'volume'
+                ? '分部位训练容量趋势 (kg)'
+                : '身体体重变化走势 (kg)'}
+            </h2>
+            {chartMode === 'volume' && (
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                同部位跨场次自动连续连线 · 点击图例可筛选部位
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
             <button
               type="button"
               onClick={() => setChartMode('volume')}
@@ -273,52 +379,205 @@ export const AnalyticsTab: React.FC = () => {
           </div>
         </div>
 
-        <div className="h-44 w-full">
+        {/* Muscle Group Interactive Legend */}
+        {chartMode === 'volume' && (
+          <div className="flex items-center flex-wrap gap-1.5">
+            {VOLUME_MUSCLE_SERIES.map((series) => {
+              const active = visibleMuscles[series.key];
+              return (
+                <button
+                  key={series.key}
+                  type="button"
+                  onClick={() => toggleMuscleSeries(series.key)}
+                  aria-pressed={active}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer ${
+                    active
+                      ? 'bg-slate-950/90 border-slate-700 text-slate-100'
+                      : 'bg-slate-950/30 border-slate-800/60 text-slate-500 opacity-55'
+                  }`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{
+                      backgroundColor: active ? series.color : '#475569',
+                    }}
+                  />
+                  <span>{series.label}</span>
+                </button>
+              );
+            })}
+            {Object.values(visibleMuscles).some((v) => !v) && (
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleMuscles({
+                    chest: true,
+                    back: true,
+                    legs: true,
+                    shoulders: true,
+                    arms: true,
+                  })
+                }
+                className="px-2 py-1 rounded-lg text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer"
+              >
+                全显
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="h-52 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={activeChartData}>
-              <defs>
-                <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="#1e293b"
-                vertical={false}
-              />
-              <XAxis
-                dataKey="date"
-                stroke="#64748b"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                stroke="#64748b"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                width={42}
-                domain={chartMode === 'weight' ? ['dataMin - 2', 'dataMax + 2'] : ['auto', 'auto']}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#0f172a',
-                  borderColor: '#334155',
-                  borderRadius: '0.75rem',
-                  fontSize: '12px',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                name={chartMode === 'volume' ? '容量 (kg)' : '体重 (kg)'}
-                stroke="#10b981"
-                strokeWidth={2}
-                fill="url(#trendGrad)"
-              />
-            </AreaChart>
+            {chartMode === 'volume' ? (
+              <LineChart data={volumeChartData}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#1e293b"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  width={42}
+                  domain={['auto', 'auto']}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload || payload.length === 0) {
+                      return null;
+                    }
+                    const point = payload[0]
+                      ?.payload as VolumeChartDataPoint | undefined;
+                    if (!point) return null;
+
+                    const activeItems = VOLUME_MUSCLE_SERIES.filter(
+                      (s) =>
+                        visibleMuscles[s.key] &&
+                        typeof point[s.key] === 'number' &&
+                        (point[s.key] ?? 0) > 0
+                    );
+
+                    return (
+                      <div className="rounded-xl bg-slate-950/95 border border-slate-700 px-3 py-2.5 shadow-xl text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-1">
+                          <span className="font-bold text-white">
+                            {point.sessionName}
+                          </span>
+                          <span className="font-mono text-[11px] text-slate-400">
+                            {point.fullDate}
+                          </span>
+                        </div>
+                        {activeItems.length > 0 ? (
+                          <div className="space-y-1">
+                            {activeItems.map((item) => (
+                              <div
+                                key={item.key}
+                                className="flex items-center justify-between gap-4"
+                              >
+                                <span className="flex items-center gap-1.5 text-slate-300">
+                                  <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: item.color }}
+                                  />
+                                  {item.label}
+                                </span>
+                                <span className="font-mono font-bold text-white">
+                                  {point[item.key]} kg
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400">
+                            本场主要为已隐藏部位训练
+                          </div>
+                        )}
+                        <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between gap-4 text-[11px] text-slate-400">
+                          <span>当场总容量</span>
+                          <span className="font-mono font-bold text-slate-200">
+                            {point.totalVolumeKg} kg
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                {VOLUME_MUSCLE_SERIES.map((series) =>
+                  visibleMuscles[series.key] ? (
+                    <Line
+                      key={series.key}
+                      type="monotone"
+                      dataKey={series.key}
+                      name={series.label}
+                      stroke={series.color}
+                      strokeWidth={2.5}
+                      connectNulls={true}
+                      dot={{ r: 3, fill: series.color, strokeWidth: 0 }}
+                      activeDot={{
+                        r: 5,
+                        fill: series.color,
+                        stroke: '#0f172a',
+                        strokeWidth: 2,
+                      }}
+                    />
+                  ) : null
+                )}
+              </LineChart>
+            ) : (
+              <AreaChart data={weightChartData}>
+                <defs>
+                  <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#1e293b"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  width={42}
+                  domain={['dataMin - 2', 'dataMax + 2']}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#0f172a',
+                    borderColor: '#334155',
+                    borderRadius: '0.75rem',
+                    fontSize: '12px',
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  name="体重 (kg)"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  fill="url(#trendGrad)"
+                />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         </div>
 
