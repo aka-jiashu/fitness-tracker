@@ -39,6 +39,12 @@ export interface Exercise {
 }
 
 // ==================== 3. 训练计划与模板 (Routine) ====================
+export interface RoutinePresetSet {
+  weight: number;
+  reps: number;
+  setType?: SetType;
+}
+
 export interface RoutineExercise {
   exerciseId: string;
   targetSets: number;             // 预设目标组数 (如 4)
@@ -46,6 +52,7 @@ export interface RoutineExercise {
   targetUnit: WeightUnit;
   restSeconds: number;            // 推荐休息时长 (如 90)
   notes?: string;                 // 备注要求
+  presetSets?: RoutinePresetSet[]; // 无历史记录时的默认每组阶梯重量与次数预设
 }
 
 export interface Routine {

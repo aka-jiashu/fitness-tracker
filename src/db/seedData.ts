@@ -1,9 +1,11 @@
 import {
   Exercise,
   Routine,
+  RoutinePresetSet,
   WorkoutSession,
   WorkoutSet,
   BodyMetric,
+  BackupPayload,
   WeightUnit,
   SetType,
 } from '../types/fitness';
@@ -11,7 +13,7 @@ import { calculateSessionVolumeKg, estimate1RMKg } from '../utils/fitnessUtils';
 
 const BASE_TIME = new Date('2026-07-01T10:00:00+08:00').getTime();
 
-// ==================== 1. 预置动作库 (覆盖用户真实日志全部动作 + 经典扩充) ====================
+// ==================== 1. 预置动作库 (覆盖训练计划与示例数据全部动作) ====================
 export const INITIAL_EXERCISES: Exercise[] = [
   // --- 胸部 (Chest) ---
   {
@@ -631,98 +633,378 @@ export const INITIAL_EXERCISES: Exercise[] = [
   },
 ];
 
-// ==================== 2. 专属训练计划模板 (基于用户最新 9-10 月训练结构定制) ====================
+// 辅助函数：将阶梯组配置展开为 presetSets 数组
+function expandPresets(
+  batches: Array<{ w: number; r: number; c: number; t?: SetType }>
+): RoutinePresetSet[] {
+  const result: RoutinePresetSet[] = [];
+  for (const b of batches) {
+    for (let i = 0; i < b.c; i++) {
+      result.push({ weight: b.w, reps: b.r, setType: b.t });
+    }
+  }
+  return result;
+}
+
+// ==================== 2. 4 套分部位训练计划 (根据最新修正训练数据生成) ====================
 export const INITIAL_ROUTINES: Routine[] = [
   {
     id: 'routine_user_legs',
-    name: '周一 · 臀腿综合训练 (腿日)',
-    description: '深蹲 + 罗马尼亚硬拉 + 箭步蹲 + 深蹲跳 + 腿屈伸 + 蹬腿机完整下肢动作链。',
+    name: '臀腿训练 · 深蹲+硬拉+箭步蹲+器械',
+    description:
+      '基于最新臀腿训练生成：哑铃深蹲(70lb) + 罗马尼亚硬拉(70lb) + 箭步蹲(60lb) + 窄距深蹲跳 + 腿屈伸(15kg) + 宽距蹬腿机(75kg)。',
     splitType: 'Split4',
     dayOfWeek: 1, // 周一
     isBuiltin: true,
     createdAt: BASE_TIME,
     exercises: [
-      { exerciseId: 'ex_db_squat', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '前2组空手热身，后4组35lb正式组' },
-      { exerciseId: 'ex_db_rdl', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '60lb×2组 + 70lb×4~6组' },
-      { exerciseId: 'ex_db_lunge', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '50lb×2组 + 60lb×4组' },
-      { exerciseId: 'ex_narrow_jump_squat', targetSets: 4, targetReps: 12, targetUnit: 'kg', restSeconds: 60, notes: '空手自重爆发跳' },
-      { exerciseId: 'ex_leg_extension', targetSets: 2, targetReps: 12, targetUnit: 'kg', restSeconds: 60, notes: '15kg 股四头肌孤立充血' },
-      { exerciseId: 'ex_wide_leg_press', targetSets: 6, targetReps: 15, targetUnit: 'kg', restSeconds: 90, notes: '65kg×12×2 + 75kg×15×4' },
+      {
+        exerciseId: 'ex_db_squat',
+        targetSets: 8,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '空×12×2 (热身) + 70lb×12×6',
+        presetSets: expandPresets([
+          { w: 0, r: 12, c: 2, t: 'warmup' },
+          { w: 70, r: 12, c: 6 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_rdl',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '60lb×12×2 + 70lb×12×4',
+        presetSets: expandPresets([
+          { w: 60, r: 12, c: 2 },
+          { w: 70, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_lunge',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '50lb×12×2 + 60lb×12×4',
+        presetSets: expandPresets([
+          { w: 50, r: 12, c: 2 },
+          { w: 60, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_narrow_jump_squat',
+        targetSets: 4,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 60,
+        notes: '空×12×4 (自重爆发跳)',
+        presetSets: expandPresets([{ w: 0, r: 12, c: 4 }]),
+      },
+      {
+        exerciseId: 'ex_leg_extension',
+        targetSets: 2,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 60,
+        notes: '15kg×12×2',
+        presetSets: expandPresets([{ w: 15, r: 12, c: 2 }]),
+      },
+      {
+        exerciseId: 'ex_wide_leg_press',
+        targetSets: 6,
+        targetReps: 15,
+        targetUnit: 'kg',
+        restSeconds: 90,
+        notes: '65kg×12×2 + 75kg×15×4',
+        presetSets: expandPresets([
+          { w: 65, r: 12, c: 2 },
+          { w: 75, r: 15, c: 4 },
+        ]),
+      },
     ],
   },
   {
     id: 'routine_user_chest',
-    name: '周二 · 胸部轰炸 (平胸+上斜+器械)',
-    description: '哑铃卧推冲重量 + 飞鸟拉伸 + 器械推胸与夹胸 + 上斜卧推与飞鸟收尾。',
+    name: '胸部训练 · 卧推+飞鸟+器械+上斜',
+    description:
+      '基于最新胸部训练生成：哑铃卧推(70~100lb) + 哑铃飞鸟(50~60lb) + 器械推胸(35~45kg) + 器械夹胸(25~30kg) + 上斜卧推(50~60lb) + 上斜飞鸟(40~50lb)。',
     splitType: 'Split4',
     dayOfWeek: 2, // 周二
     isBuiltin: true,
     createdAt: BASE_TIME,
     exercises: [
-      { exerciseId: 'ex_db_bench_press', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '35lb/40lb渐进，主力组 45lb~50lb' },
-      { exerciseId: 'ex_db_fly', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '25lb×2 + 30lb×4' },
-      { exerciseId: 'ex_machine_chest_press', targetSets: 6, targetReps: 12, targetUnit: 'kg', restSeconds: 90, notes: '35kg×2 + 45kg×4' },
-      { exerciseId: 'ex_pec_deck_fly', targetSets: 6, targetReps: 12, targetUnit: 'kg', restSeconds: 60, notes: '25kg×2 + 30kg×4' },
-      { exerciseId: 'ex_incline_db_press', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '25lb×2 + 30lb×4' },
-      { exerciseId: 'ex_incline_db_fly', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '20lb×2 + 25lb×4' },
+      {
+        exerciseId: 'ex_db_bench_press',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '70lb×12×1 + 80lb×12×1 + 90lb×12×2 + 100lb×12×2',
+        presetSets: expandPresets([
+          { w: 70, r: 12, c: 1 },
+          { w: 80, r: 12, c: 1 },
+          { w: 90, r: 12, c: 2 },
+          { w: 100, r: 12, c: 2 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_fly',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '50lb×12×2 + 60lb×12×4',
+        presetSets: expandPresets([
+          { w: 50, r: 12, c: 2 },
+          { w: 60, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_machine_chest_press',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 90,
+        notes: '35kg×12×2 + 45kg×12×4',
+        presetSets: expandPresets([
+          { w: 35, r: 12, c: 2 },
+          { w: 45, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_pec_deck_fly',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 60,
+        notes: '25kg×12×2 + 30kg×12×4',
+        presetSets: expandPresets([
+          { w: 25, r: 12, c: 2 },
+          { w: 30, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_incline_db_press',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '50lb×12×2 + 60lb×12×4',
+        presetSets: expandPresets([
+          { w: 50, r: 12, c: 2 },
+          { w: 60, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_incline_db_fly',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '40lb×12×2 + 50lb×12×4',
+        presetSets: expandPresets([
+          { w: 40, r: 12, c: 2 },
+          { w: 50, r: 12, c: 4 },
+        ]),
+      },
     ],
   },
   {
     id: 'routine_user_back',
-    name: '周四 · 背部与后束强化 (背日)',
-    description: '坐姿划船 + 直臂下压 + 哑铃俯身划船 + 绳索面拉 + 宽距高位下拉 + 辅助引体。',
+    name: '背部训练 · 划船+直臂下压+面拉+下拉+引体',
+    description:
+      '基于最新背部训练生成：器械坐姿划船(120~130lb) + 俯身直臂下压(50~60lb) + 哑铃俯身划船(70~80lb) + 绳索面拉(50~60lb) + 宽距高位下拉(25~35kg) + 弹力带辅助引体。',
     splitType: 'Split4',
     dayOfWeek: 4, // 周四
     isBuiltin: true,
     createdAt: BASE_TIME,
     exercises: [
-      { exerciseId: 'ex_seated_cable_row', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '120lb×2 + 130lb×4' },
-      { exerciseId: 'ex_straight_arm_pulldown', targetSets: 6, targetReps: 15, targetUnit: 'lb', restSeconds: 60, notes: '50lb×2 + 60lb×4' },
-      { exerciseId: 'ex_db_row', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '35lb×2 + 40lb×4' },
-      { exerciseId: 'ex_face_pull', targetSets: 6, targetReps: 15, targetUnit: 'lb', restSeconds: 60, notes: '50lb×2 + 60lb×4' },
-      { exerciseId: 'ex_wide_lat_pulldown', targetSets: 6, targetReps: 12, targetUnit: 'kg', restSeconds: 90, notes: '25kg×2 + 30kg×4（变轻松了呢！）' },
-      { exerciseId: 'ex_band_pull_up', targetSets: 4, targetReps: 12, targetUnit: 'kg', restSeconds: 90, notes: '弹力带辅助引体 12×4' },
+      {
+        exerciseId: 'ex_seated_cable_row',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '120lb×12×2 + 130lb×12×4',
+        presetSets: expandPresets([
+          { w: 120, r: 12, c: 2 },
+          { w: 130, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_straight_arm_pulldown',
+        targetSets: 6,
+        targetReps: 15,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '50lb×15×2 + 60lb×15×4',
+        presetSets: expandPresets([
+          { w: 50, r: 15, c: 2 },
+          { w: 60, r: 15, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_row',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '70lb×12×2 + 80lb×12×4',
+        presetSets: expandPresets([
+          { w: 70, r: 12, c: 2 },
+          { w: 80, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_face_pull',
+        targetSets: 6,
+        targetReps: 15,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '50lb×15×2 + 60lb×15×4',
+        presetSets: expandPresets([
+          { w: 50, r: 15, c: 2 },
+          { w: 60, r: 15, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_wide_lat_pulldown',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 90,
+        notes: '25kg×15×2 + 35kg×12×4',
+        presetSets: expandPresets([
+          { w: 25, r: 15, c: 2 },
+          { w: 35, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_band_pull_up',
+        targetSets: 4,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 90,
+        notes: '12×4 (弹力带辅助)',
+        presetSets: expandPresets([{ w: 0, r: 12, c: 4 }]),
+      },
     ],
   },
   {
     id: 'routine_user_shoulders_arms',
-    name: '周五 · 肩部与三头联合 (肩臂日)',
-    description: '哑铃推举 + 前平举 + 俯身飞鸟打造立体三角肌，配合颈后臂屈伸、直杆下压、三头下压与凳上臂屈伸全面轰炸三头肌。',
+    name: '肩与三头训练 · 推举+飞鸟+臂屈伸+下压',
+    description:
+      '基于最新肩臂联合训练生成：哑铃推举(50~70lb) + 颈后臂屈伸(25~35lb) + 前平举(20~30lb) + 绳索直杆下压(60~80lb) + 俯身飞鸟(40~50lb) + 绳索三头下压(20~40lb) + 凳上臂屈伸 + 俯身臂屈伸(30~40lb)。',
     splitType: 'Split4',
     dayOfWeek: 5, // 周五
     isBuiltin: true,
     createdAt: BASE_TIME,
     exercises: [
-      { exerciseId: 'ex_db_shoulder_press', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90, notes: '25lb×2 + 30lb×2 + 35lb×2' },
-      { exerciseId: 'ex_db_overhead_tricep_ext', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '25lb×15×2 + 30lb×12×2 + 35lb×12×2' },
-      { exerciseId: 'ex_db_front_raise', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '10lb×15×2 + 15lb×12×4' },
-      { exerciseId: 'ex_cable_straight_bar_pushdown', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '60lb×2 + 70lb×1 + 80lb×3' },
-      { exerciseId: 'ex_rear_delt_fly', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '20lb×2 + 25lb×4' },
-      { exerciseId: 'ex_cable_tricep_pushdown', targetSets: 5, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '20lb×1 + 30lb×2 + 40lb×2' },
-      { exerciseId: 'ex_bench_dips', targetSets: 4, targetReps: 12, targetUnit: 'kg', restSeconds: 60, notes: '自重 12×4' },
-      { exerciseId: 'ex_db_tricep_kickback', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60, notes: '15lb×2 + 20lb×4' },
-    ],
-  },
-  {
-    id: 'routine_user_incline_chest',
-    name: '备选 · 上斜胸与中缝专项',
-    description: '以上斜哑铃卧推、上斜飞鸟与龙门架/蝴蝶机夹胸为主的上胸强化模板。',
-    splitType: 'Custom',
-    dayOfWeek: 6, // 周六
-    isBuiltin: true,
-    createdAt: BASE_TIME,
-    exercises: [
-      { exerciseId: 'ex_incline_db_press', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 90 },
-      { exerciseId: 'ex_incline_db_fly', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60 },
-      { exerciseId: 'ex_machine_chest_press', targetSets: 6, targetReps: 12, targetUnit: 'kg', restSeconds: 90 },
-      { exerciseId: 'ex_butterfly_pec_fly', targetSets: 6, targetReps: 12, targetUnit: 'kg', restSeconds: 60 },
-      { exerciseId: 'ex_incline_close_grip_bb_press', targetSets: 4, targetReps: 12, targetUnit: 'lb', restSeconds: 90 },
-      { exerciseId: 'ex_cable_chest_fly', targetSets: 6, targetReps: 12, targetUnit: 'lb', restSeconds: 60 },
+      {
+        exerciseId: 'ex_db_shoulder_press',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 90,
+        notes: '50lb×12×2 + 60lb×12×2 + 70lb×12×2',
+        presetSets: expandPresets([
+          { w: 50, r: 12, c: 2 },
+          { w: 60, r: 12, c: 2 },
+          { w: 70, r: 12, c: 2 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_overhead_tricep_ext',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '25lb×15×2 + 30lb×12×2 + 35lb×12×2',
+        presetSets: expandPresets([
+          { w: 25, r: 15, c: 2 },
+          { w: 30, r: 12, c: 2 },
+          { w: 35, r: 12, c: 2 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_db_front_raise',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '20lb×15×2 + 30lb×12×4',
+        presetSets: expandPresets([
+          { w: 20, r: 15, c: 2 },
+          { w: 30, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_cable_straight_bar_pushdown',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '60lb×12×2 + 70lb×12×1 + 80lb×12×3',
+        presetSets: expandPresets([
+          { w: 60, r: 12, c: 2 },
+          { w: 70, r: 12, c: 1 },
+          { w: 80, r: 12, c: 3 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_rear_delt_fly',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '40lb×12×2 + 50lb×12×4',
+        presetSets: expandPresets([
+          { w: 40, r: 12, c: 2 },
+          { w: 50, r: 12, c: 4 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_cable_tricep_pushdown',
+        targetSets: 5,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '20lb×12×1 + 30lb×12×2 + 40lb×12×2',
+        presetSets: expandPresets([
+          { w: 20, r: 12, c: 1 },
+          { w: 30, r: 12, c: 2 },
+          { w: 40, r: 12, c: 2 },
+        ]),
+      },
+      {
+        exerciseId: 'ex_bench_dips',
+        targetSets: 4,
+        targetReps: 12,
+        targetUnit: 'kg',
+        restSeconds: 60,
+        notes: '12×4 (自重)',
+        presetSets: expandPresets([{ w: 0, r: 12, c: 4 }]),
+      },
+      {
+        exerciseId: 'ex_db_tricep_kickback',
+        targetSets: 6,
+        targetReps: 12,
+        targetUnit: 'lb',
+        restSeconds: 60,
+        notes: '30lb×12×2 + 40lb×12×4',
+        presetSets: expandPresets([
+          { w: 30, r: 12, c: 2 },
+          { w: 40, r: 12, c: 4 },
+        ]),
+      },
     ],
   },
 ];
 
-// ==================== 3. 用户 2026.07.20 ~ 2026.10.22 真实训练日志构建器 ====================
+// ==================== 3. 示例训练记录数据 (2026.07.20 ~ 2026.10.30 共 39 场最新修正记录，供用户按需导入) ====================
 interface RawBatch {
   w: number;
   u: WeightUnit;
@@ -767,16 +1049,21 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   {
     date: '2026-07-20',
     name: '周一 · 胸部训练 (上斜+推胸+绳索)',
-    routineId: 'routine_user_incline_chest',
+    routineId: 'routine_user_chest',
     durationMin: 55,
     items: [
       {
         exId: 'ex_incline_db_press',
-        batches: [b(20, 'lb', 12, 2, { t: 'warmup' }), b(30, 'lb', 12, 1), b(35, 'lb', 12, 2), b(40, 'lb', 12, 2)],
+        batches: [
+          b(40, 'lb', 12, 2, { t: 'warmup' }),
+          b(60, 'lb', 12, 1),
+          b(70, 'lb', 12, 2),
+          b(80, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 1), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 1), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -784,7 +1071,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_cable_chest_fly',
-        batches: [b(30, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 4)],
       },
     ],
   },
@@ -797,7 +1084,11 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_row',
-        batches: [b(20, 'lb', 12, 1, { t: 'warmup' }), b(30, 'lb', 12, 2), b(35, 'lb', 12, 3)],
+        batches: [
+          b(40, 'lb', 12, 1, { t: 'warmup' }),
+          b(60, 'lb', 12, 2),
+          b(70, 'lb', 12, 3),
+        ],
       },
       {
         exId: 'ex_lat_pulldown',
@@ -805,11 +1096,15 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_seated_cable_row',
-        batches: [b(80, 'lb', 12, 2), b(85, 'lb', 12, 4)],
+        batches: [b(80, 'lb', 12, 2), b(90, 'lb', 12, 4)],
       },
       {
         exId: 'ex_straight_arm_pulldown',
-        batches: [b(40, 'lb', 15, 2), b(50, 'lb', 12, 3), b(45, 'lb', 12, 1, { t: 'drop' })],
+        batches: [
+          b(40, 'lb', 15, 2),
+          b(50, 'lb', 12, 3),
+          b(45, 'lb', 12, 1, { t: 'drop' }),
+        ],
       },
       {
         exId: 'ex_db_deadlift',
@@ -823,28 +1118,28 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     name: '周三 · 肩部专项轰炸',
     routineId: 'routine_user_shoulders_arms',
     durationMin: 62,
-    feeling: '哑铃推举 25lb 最后两组推到力竭，前中后束全面充血',
+    feeling: '哑铃推举 50lb 最后两个力竭，前中后束全面充血',
     items: [
       {
         exId: 'ex_db_shoulder_press',
         note: '最后两个力竭',
         batches: [
-          b(15, 'lb', 15, 2, { t: 'warmup' }),
-          b(25, 'lb', 12, 2),
-          b(25, 'lb', 12, 2, { t: 'failure' }),
+          b(30, 'lb', 15, 2, { t: 'warmup' }),
+          b(50, 'lb', 12, 2),
+          b(50, 'lb', 12, 2, { t: 'failure' }),
         ],
       },
       {
         exId: 'ex_db_front_raise',
-        batches: [b(10, 'lb', 15, 6)],
+        batches: [b(20, 'lb', 15, 6)],
       },
       {
         exId: 'ex_rear_delt_fly',
-        batches: [b(15, 'lb', 15, 2), b(20, 'lb', 15, 4)],
+        batches: [b(30, 'lb', 15, 2), b(40, 'lb', 15, 4)],
       },
       {
         exId: 'ex_db_lateral_raise',
-        batches: [b(10, 'lb', 15, 3)],
+        batches: [b(20, 'lb', 15, 3)],
       },
       {
         exId: 'ex_cable_lateral_raise',
@@ -873,7 +1168,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_tricep_kickback',
-        batches: [b(15, 'lb', 12, 4)],
+        batches: [b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_tricep_pushdown',
@@ -888,17 +1183,23 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   // 5. 2026-07-28 周二
   {
     date: '2026-07-28',
-    name: '周二 · 胸部训练 (哑铃卧推突破45lb)',
+    name: '周二 · 胸部训练 (哑铃卧推突破90lb)',
     routineId: 'routine_user_chest',
     durationMin: 56,
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(25, 'lb', 12, 1), b(30, 'lb', 12, 1), b(35, 'lb', 12, 1), b(40, 'lb', 12, 2), b(45, 'lb', 12, 2)],
+        batches: [
+          b(50, 'lb', 12, 1),
+          b(60, 'lb', 12, 1),
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 2),
+          b(90, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 5)],
+        batches: [b(50, 'lb', 12, 5)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -906,7 +1207,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_cable_chest_fly',
-        batches: [b(30, 'lb', 12, 6)],
+        batches: [b(60, 'lb', 12, 6)],
       },
     ],
   },
@@ -931,7 +1232,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_row',
-        batches: [b(30, 'lb', 12, 2), b(35, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_straight_arm_pulldown',
@@ -952,7 +1253,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_shoulder_press',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 15, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 15, 4)],
       },
       {
         exId: 'ex_face_pull',
@@ -960,7 +1261,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_front_raise',
-        batches: [b(10, 'lb', 15, 2), b(15, 'lb', 12, 4)],
+        batches: [b(20, 'lb', 15, 2), b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_lateral_raise',
@@ -968,7 +1269,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_rear_delt_fly',
-        batches: [b(15, 'lb', 15, 2), b(20, 'lb', 15, 4)],
+        batches: [b(30, 'lb', 15, 2), b(40, 'lb', 15, 4)],
       },
     ],
   },
@@ -985,7 +1286,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_tricep_kickback',
-        batches: [b(15, 'lb', 12, 2), b(20, 'lb', 12, 4)],
+        batches: [b(30, 'lb', 12, 2), b(40, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_straight_bar_pushdown',
@@ -1010,7 +1311,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_wide_db_squat',
-        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(35, 'lb', 12, 4)],
+        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_rdl',
@@ -1027,7 +1328,10 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_cable_hip_abduction',
         note: '未做',
-        batches: [b(10, 'lb', 12, 2, { skip: true }), b(15, 'lb', 12, 4, { skip: true })],
+        batches: [
+          b(10, 'lb', 12, 2, { skip: true }),
+          b(15, 'lb', 12, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1035,16 +1339,16 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   {
     date: '2026-08-04',
     name: '周二 · 上斜胸与蝴蝶机专项',
-    routineId: 'routine_user_incline_chest',
+    routineId: 'routine_user_chest',
     durationMin: 60,
     items: [
       {
         exId: 'ex_incline_db_press',
-        batches: [b(30, 'lb', 12, 2), b(35, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_close_grip_bb_press',
@@ -1052,7 +1356,11 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_butterfly_pec_fly',
-        batches: [b(15, 'kg', 12, 2), b(20, 'kg', 12, 1), b(25, 'kg', 12, 4)],
+        batches: [
+          b(15, 'kg', 12, 2),
+          b(20, 'kg', 12, 1),
+          b(25, 'kg', 12, 4),
+        ],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -1081,11 +1389,15 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_straight_arm_pulldown',
-        batches: [b(40, 'lb', 15, 1), b(50, 'lb', 15, 1), b(60, 'lb', 12, 4)],
+        batches: [
+          b(40, 'lb', 15, 1),
+          b(50, 'lb', 15, 1),
+          b(60, 'lb', 12, 4),
+        ],
       },
       {
         exId: 'ex_db_row',
-        batches: [b(30, 'lb', 12, 2), b(35, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_deadlift',
@@ -1103,19 +1415,19 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_shoulder_press',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 1), b(30, 'lb', 12, 3)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 1), b(60, 'lb', 12, 3)],
       },
       {
         exId: 'ex_rear_delt_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_lateral_raise',
-        batches: [b(10, 'lb', 12, 2), b(15, 'lb', 12, 4)],
+        batches: [b(20, 'lb', 12, 2), b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_front_raise',
-        batches: [b(10, 'lb', 15, 2), b(15, 'lb', 12, 4)],
+        batches: [b(20, 'lb', 15, 2), b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_face_pull',
@@ -1132,7 +1444,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_squat',
-        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(35, 'lb', 12, 4)],
+        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_rdl',
@@ -1145,7 +1457,10 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_wide_leg_press',
         note: '未做',
-        batches: [b(65, 'kg', 12, 2, { skip: true }), b(75, 'kg', 15, 4, { skip: true })],
+        batches: [
+          b(65, 'kg', 12, 2, { skip: true }),
+          b(75, 'kg', 15, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1158,15 +1473,20 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(30, 'lb', 12, 1), b(35, 'lb', 12, 1), b(45, 'lb', 12, 2), b(40, 'lb', 12, 2)],
+        batches: [
+          b(60, 'lb', 12, 1),
+          b(70, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(80, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_close_grip_db_press',
-        batches: [b(20, 'lb', 12, 5)],
+        batches: [b(40, 'lb', 12, 5)],
       },
       {
         exId: 'ex_cable_chest_fly',
@@ -1187,7 +1507,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_squat',
-        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(35, 'lb', 12, 4)],
+        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_rdl',
@@ -1216,16 +1536,16 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   {
     date: '2026-08-18',
     name: '周二 · 上斜胸与器械推胸突破40kg',
-    routineId: 'routine_user_incline_chest',
+    routineId: 'routine_user_chest',
     durationMin: 60,
     items: [
       {
         exId: 'ex_incline_db_press',
-        batches: [b(30, 'lb', 12, 2), b(35, 'lb', 12, 2), b(40, 'lb', 12, 2)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 2), b(80, 'lb', 12, 2)],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 2), b(30, 'lb', 12, 2)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 2), b(60, 'lb', 12, 2)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -1270,7 +1590,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_row',
-        batches: [b(30, 'lb', 12, 2), b(35, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_deadlift',
@@ -1288,15 +1608,20 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(30, 'lb', 12, 1), b(35, 'lb', 12, 1), b(45, 'lb', 12, 3), b(40, 'lb', 12, 1)],
+        batches: [
+          b(60, 'lb', 12, 1),
+          b(70, 'lb', 12, 1),
+          b(90, 'lb', 12, 3),
+          b(80, 'lb', 12, 1),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 6)],
+        batches: [b(50, 'lb', 12, 6)],
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(25, 'lb', 12, 5)],
+        batches: [b(50, 'lb', 12, 5)],
       },
       {
         exId: 'ex_pec_deck_fly',
@@ -1317,7 +1642,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_row',
-        batches: [b(35, 'lb', 12, 4), b(40, 'lb', 12, 2)],
+        batches: [b(70, 'lb', 12, 4), b(80, 'lb', 12, 2)],
       },
       {
         exId: 'ex_band_pull_up',
@@ -1333,7 +1658,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_wide_lat_pulldown',
-        note: '30kg*12*2 未做',
+        note: '30kg×12×2 未做',
         batches: [b(25, 'kg', 12, 4), b(30, 'kg', 12, 2, { skip: true })],
       },
       {
@@ -1361,7 +1686,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_shoulder_press',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_overhead_tricep_ext',
@@ -1369,7 +1694,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_front_raise',
-        batches: [b(10, 'lb', 15, 2), b(15, 'lb', 12, 4)],
+        batches: [b(20, 'lb', 15, 2), b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_bench_dips',
@@ -1377,7 +1702,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_rear_delt_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_straight_bar_pushdown',
@@ -1386,29 +1711,35 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_db_tricep_kickback',
         note: '未做',
-        batches: [b(15, 'lb', 12, 2, { skip: true }), b(20, 'lb', 12, 4, { skip: true })],
+        batches: [
+          b(30, 'lb', 12, 2, { skip: true }),
+          b(40, 'lb', 12, 4, { skip: true }),
+        ],
       },
       {
         exId: 'ex_cable_tricep_pushdown',
         note: '未做',
-        batches: [b(20, 'lb', 12, 2, { skip: true }), b(30, 'lb', 12, 4, { skip: true })],
+        batches: [
+          b(20, 'lb', 12, 2, { skip: true }),
+          b(30, 'lb', 12, 4, { skip: true }),
+        ],
       },
     ],
   },
   // 21. 2026-09-08 周二
   {
     date: '2026-09-08',
-    name: '周二 · 胸部训练 (飞鸟30lb+推胸40kg)',
+    name: '周二 · 胸部训练 (飞鸟60lb+推胸40kg)',
     routineId: 'routine_user_chest',
     durationMin: 60,
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 1), b(45, 'lb', 12, 3)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 1), b(90, 'lb', 12, 3)],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -1420,7 +1751,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(25, 'lb', 12, 6)],
+        batches: [b(50, 'lb', 12, 6)],
       },
     ],
   },
@@ -1430,7 +1761,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     name: '周三 · 背部与后束强化',
     routineId: 'routine_user_back',
     durationMin: 62,
-    feeling: '哑铃俯身划船 40lb×4组下次保持，有点勉强',
+    feeling: '哑铃俯身划船 80lb×4组下次保持，有点勉强',
     items: [
       {
         exId: 'ex_band_pull_up',
@@ -1439,7 +1770,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_db_row',
         note: '下次保持，有点勉强',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
       {
         exId: 'ex_seated_cable_row',
@@ -1462,13 +1793,13 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   // 23. 2026-09-10 周四
   {
     date: '2026-09-10',
-    name: '周四 · 肩臂联合全套通关 (推举35lb/直杆80lb)',
+    name: '周四 · 肩臂联合全套通关 (推举70lb/直杆80lb)',
     routineId: 'routine_user_shoulders_arms',
     durationMin: 70,
     items: [
       {
         exId: 'ex_db_shoulder_press',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 2), b(35, 'lb', 12, 2)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 2), b(70, 'lb', 12, 2)],
       },
       {
         exId: 'ex_db_overhead_tricep_ext',
@@ -1476,7 +1807,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_front_raise',
-        batches: [b(10, 'lb', 15, 2), b(15, 'lb', 12, 4)],
+        batches: [b(20, 'lb', 15, 2), b(30, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_straight_bar_pushdown',
@@ -1484,7 +1815,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_rear_delt_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_cable_tricep_pushdown',
@@ -1496,7 +1827,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_tricep_kickback',
-        batches: [b(15, 'lb', 12, 2), b(20, 'lb', 12, 4)],
+        batches: [b(30, 'lb', 12, 2), b(40, 'lb', 12, 4)],
       },
     ],
   },
@@ -1509,7 +1840,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_squat',
-        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(35, 'lb', 12, 4)],
+        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_rdl',
@@ -1517,7 +1848,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_lunge',
-        batches: [b(20, 'lb', 12, 2), b(60, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_narrow_jump_squat',
@@ -1542,15 +1873,15 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 1), b(40, 'lb', 12, 1), b(45, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 1), b(80, 'lb', 12, 1), b(90, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_pec_deck_fly',
@@ -1568,7 +1899,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     name: '周四 · 背部训练 (坐姿划船120lb)',
     routineId: 'routine_user_back',
     durationMin: 63,
-    feeling: '器械宽距高位下拉 30kg 2组改 25kg 了 -…-；俯身划船 40lb 下次保持',
+    feeling: '器械宽距高位下拉 30kg 2组改 25kg 了 -…-；俯身划船 80lb 下次保持',
     items: [
       {
         exId: 'ex_band_pull_up',
@@ -1584,7 +1915,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_wide_lat_pulldown',
-        note: '30kg*12*0（2 改 25 了 -…-）',
+        note: '30kg×12×0（2 改 25 了 -…-）',
         batches: [b(25, 'kg', 12, 6)],
       },
       {
@@ -1594,43 +1925,54 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_db_row',
         note: '下次保持，有点勉强',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
     ],
   },
   // 27. 2026-09-21 周一
   {
     date: '2026-09-21',
-    name: '周一 · 胸部训练 (哑铃卧推突破50lb!)',
+    name: '周一 · 胸部训练 (哑铃卧推突破100lb!)',
     routineId: 'routine_user_chest',
     durationMin: 52,
-    feeling: '哑铃卧推成功推起 50lb×12×2！',
+    feeling: '哑铃卧推成功推起 100lb×12×2！',
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 1), b(40, 'lb', 12, 1), b(45, 'lb', 12, 2), b(50, 'lb', 12, 2)],
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(30, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(60, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_pec_deck_fly',
         note: '未做',
-        batches: [b(25, 'kg', 12, 2, { skip: true }), b(30, 'kg', 12, 4, { skip: true })],
+        batches: [
+          b(25, 'kg', 12, 2, { skip: true }),
+          b(30, 'kg', 12, 4, { skip: true }),
+        ],
       },
       {
         exId: 'ex_machine_chest_press',
         note: '未做',
-        batches: [b(35, 'kg', 12, 2, { skip: true }), b(45, 'kg', 12, 4, { skip: true })],
+        batches: [
+          b(35, 'kg', 12, 2, { skip: true }),
+          b(45, 'kg', 12, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1640,12 +1982,12 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     name: '周二 · 背部强化训练',
     routineId: 'routine_user_back',
     durationMin: 62,
-    feeling: '宽距高位下拉 30kg 稳步完成 3 组，俯身划船 40lb 下次保持',
+    feeling: '宽距高位下拉 30kg 稳步完成 3 组，俯身划船 80lb 下次保持',
     items: [
       {
         exId: 'ex_db_row',
         note: '下次保持，有点勉强',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
       {
         exId: 'ex_band_pull_up',
@@ -1678,11 +2020,16 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 1), b(40, 'lb', 12, 1), b(45, 'lb', 12, 2), b(50, 'lb', 12, 2)],
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -1690,18 +2037,27 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_incline_db_press',
-        note: '30lb*12*4 未做',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4, { skip: true })],
+        note: '未做',
+        batches: [
+          b(50, 'lb', 12, 2, { skip: true }),
+          b(60, 'lb', 12, 4, { skip: true }),
+        ],
       },
       {
         exId: 'ex_incline_db_fly',
         note: '未做',
-        batches: [b(20, 'lb', 12, 2, { skip: true }), b(25, 'lb', 12, 4, { skip: true })],
+        batches: [
+          b(40, 'lb', 12, 2, { skip: true }),
+          b(50, 'lb', 12, 4, { skip: true }),
+        ],
       },
       {
         exId: 'ex_pec_deck_fly',
         note: '未做',
-        batches: [b(25, 'kg', 12, 2, { skip: true }), b(30, 'kg', 12, 4, { skip: true })],
+        batches: [
+          b(25, 'kg', 12, 2, { skip: true }),
+          b(30, 'kg', 12, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1715,7 +2071,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       {
         exId: 'ex_db_row',
         note: '下次保持，有点勉强',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
       {
         exId: 'ex_wide_lat_pulldown',
@@ -1743,35 +2099,46 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   // 31. 2026-10-15 周四
   {
     date: '2026-10-15',
-    name: '周四 · 胸部自由重量+器械推胸',
+    name: '周四 · 胸部自由重量训练',
     routineId: 'routine_user_chest',
     durationMin: 56,
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 1), b(40, 'lb', 12, 1), b(45, 'lb', 12, 2), b(50, 'lb', 12, 2)],
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
       {
         exId: 'ex_machine_chest_press',
-        note: '45kg*12*4 未做',
-        batches: [b(35, 'kg', 12, 4), b(45, 'kg', 12, 4, { skip: true })],
+        note: '未做',
+        batches: [
+          b(35, 'kg', 12, 4, { skip: true }),
+          b(45, 'kg', 12, 4, { skip: true }),
+        ],
       },
       {
         exId: 'ex_pec_deck_fly',
-        note: '30kgx12x4 未做',
-        batches: [b(25, 'kg', 12, 4), b(30, 'kg', 12, 4, { skip: true })],
+        note: '未做',
+        batches: [
+          b(25, 'kg', 12, 4, { skip: true }),
+          b(30, 'kg', 12, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1793,7 +2160,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_row',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
       {
         exId: 'ex_face_pull',
@@ -1814,19 +2181,18 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
   // 33. 2026-10-19 周一
   {
     date: '2026-10-19',
-    name: '周一 · 腿日 (罗马尼亚硬拉70lb×6组加量)',
+    name: '周一 · 腿日 (哑铃深蹲70lb×6组加量)',
     routineId: 'routine_user_legs',
     durationMin: 64,
-    feeling: '哑铃罗马尼亚硬拉 70lb 由 4 组加量完成 6 组！',
+    feeling: '哑铃深蹲 70lb 正式组加量完成 6 组！',
     items: [
       {
         exId: 'ex_db_squat',
-        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(35, 'lb', 12, 4)],
+        batches: [b(0, 'lb', 12, 2, { t: 'warmup' }), b(70, 'lb', 12, 6)],
       },
       {
         exId: 'ex_db_rdl',
-        note: '70lbx12x（4）6 组突破',
-        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 6)],
+        batches: [b(60, 'lb', 12, 2), b(70, 'lb', 12, 4)],
       },
       {
         exId: 'ex_db_lunge',
@@ -1842,8 +2208,11 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_wide_leg_press',
-        note: '75kgx15x4 未做',
-        batches: [b(65, 'kg', 12, 2), b(75, 'kg', 15, 4, { skip: true })],
+        note: '未做',
+        batches: [
+          b(65, 'kg', 12, 2, { skip: true }),
+          b(75, 'kg', 15, 4, { skip: true }),
+        ],
       },
     ],
   },
@@ -1857,11 +2226,16 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
     items: [
       {
         exId: 'ex_db_bench_press',
-        batches: [b(35, 'lb', 12, 1), b(40, 'lb', 12, 1), b(45, 'lb', 12, 2), b(50, 'lb', 12, 2)],
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
       },
       {
         exId: 'ex_db_fly',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_machine_chest_press',
@@ -1873,11 +2247,11 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_incline_db_press',
-        batches: [b(25, 'lb', 12, 2), b(30, 'lb', 12, 4)],
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
       },
       {
         exId: 'ex_incline_db_fly',
-        batches: [b(20, 'lb', 12, 2), b(25, 'lb', 12, 4)],
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
       },
     ],
   },
@@ -1899,7 +2273,7 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
       },
       {
         exId: 'ex_db_row',
-        batches: [b(35, 'lb', 12, 2), b(40, 'lb', 12, 4)],
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
       },
       {
         exId: 'ex_face_pull',
@@ -1909,6 +2283,151 @@ const RAW_USER_LOGS: RawSessionSpec[] = [
         exId: 'ex_wide_lat_pulldown',
         note: '变轻松了呢！',
         batches: [b(25, 'kg', 12, 2), b(30, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_band_pull_up',
+        batches: [b(0, 'kg', 12, 4)],
+      },
+    ],
+  },
+  // 36. 2026-10-26 周一
+  {
+    date: '2026-10-26',
+    name: '周一 · 胸部6动作全满贯巩固',
+    routineId: 'routine_user_chest',
+    durationMin: 66,
+    items: [
+      {
+        exId: 'ex_db_bench_press',
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
+      },
+      {
+        exId: 'ex_db_fly',
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_machine_chest_press',
+        batches: [b(35, 'kg', 12, 2), b(45, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_pec_deck_fly',
+        batches: [b(25, 'kg', 12, 2), b(30, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_incline_db_press',
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_incline_db_fly',
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
+      },
+    ],
+  },
+  // 37. 2026-10-27 周二
+  {
+    date: '2026-10-27',
+    name: '周二 · 背部高容量稳定输出',
+    routineId: 'routine_user_back',
+    durationMin: 64,
+    feeling: '器械宽距高位下拉变轻松了呢！准备冲击 35kg',
+    items: [
+      {
+        exId: 'ex_seated_cable_row',
+        batches: [b(120, 'lb', 12, 2), b(130, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_straight_arm_pulldown',
+        batches: [b(50, 'lb', 15, 2), b(60, 'lb', 15, 4)],
+      },
+      {
+        exId: 'ex_db_row',
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_face_pull',
+        batches: [b(50, 'lb', 15, 2), b(60, 'lb', 15, 4)],
+      },
+      {
+        exId: 'ex_wide_lat_pulldown',
+        note: '变轻松了呢！',
+        batches: [b(25, 'kg', 12, 2), b(30, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_band_pull_up',
+        batches: [b(0, 'kg', 12, 4)],
+      },
+    ],
+  },
+  // 38. 2026-10-29 周四
+  {
+    date: '2026-10-29',
+    name: '周四 · 胸部6动作全满贯训练',
+    routineId: 'routine_user_chest',
+    durationMin: 65,
+    items: [
+      {
+        exId: 'ex_db_bench_press',
+        batches: [
+          b(70, 'lb', 12, 1),
+          b(80, 'lb', 12, 1),
+          b(90, 'lb', 12, 2),
+          b(100, 'lb', 12, 2),
+        ],
+      },
+      {
+        exId: 'ex_db_fly',
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_machine_chest_press',
+        batches: [b(35, 'kg', 12, 2), b(45, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_pec_deck_fly',
+        batches: [b(25, 'kg', 12, 2), b(30, 'kg', 12, 4)],
+      },
+      {
+        exId: 'ex_incline_db_press',
+        batches: [b(50, 'lb', 12, 2), b(60, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_incline_db_fly',
+        batches: [b(40, 'lb', 12, 2), b(50, 'lb', 12, 4)],
+      },
+    ],
+  },
+  // 39. 2026-10-30 周五
+  {
+    date: '2026-10-30',
+    name: '周五 · 背部进阶 (宽距高位下拉突破35kg!)',
+    routineId: 'routine_user_back',
+    durationMin: 66,
+    feeling: '器械宽距高位下拉成功进阶至 25kg×15×2 + 35kg×12×4！',
+    items: [
+      {
+        exId: 'ex_seated_cable_row',
+        batches: [b(120, 'lb', 12, 2), b(130, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_straight_arm_pulldown',
+        batches: [b(50, 'lb', 15, 2), b(60, 'lb', 15, 4)],
+      },
+      {
+        exId: 'ex_db_row',
+        batches: [b(70, 'lb', 12, 2), b(80, 'lb', 12, 4)],
+      },
+      {
+        exId: 'ex_face_pull',
+        batches: [b(50, 'lb', 15, 2), b(60, 'lb', 15, 4)],
+      },
+      {
+        exId: 'ex_wide_lat_pulldown',
+        batches: [b(25, 'kg', 15, 2), b(35, 'kg', 12, 4)],
       },
       {
         exId: 'ex_band_pull_up',
@@ -1949,7 +2468,9 @@ function buildUserHistoryData(): {
         for (let i = 0; i < batch.c; i++) {
           const isSkipped = Boolean(batch.skip);
           const isCompleted = !isSkipped;
-          const est1RM = isCompleted ? estimate1RMKg(batch.w, batch.r, batch.u) : 0;
+          const est1RM = isCompleted
+            ? estimate1RMKg(batch.w, batch.r, batch.u)
+            : 0;
           let isPR = false;
 
           if (isCompleted && batch.w > 0) {
@@ -1972,7 +2493,9 @@ function buildUserHistoryData(): {
             isCompleted,
             isSkipped,
             isPR,
-            completedAt: isCompleted ? startTime + orderInEx * 90 * 1000 : undefined,
+            completedAt: isCompleted
+              ? startTime + orderInEx * 90 * 1000
+              : undefined,
           };
 
           currentSessionSets.push(setObj);
@@ -1993,7 +2516,8 @@ function buildUserHistoryData(): {
       durationSeconds,
       totalVolumeKg,
       feelingNotes: raw.feeling,
-      exerciseNotes: Object.keys(exerciseNotes).length > 0 ? exerciseNotes : undefined,
+      exerciseNotes:
+        Object.keys(exerciseNotes).length > 0 ? exerciseNotes : undefined,
       exerciseOrder,
       isFinished: true,
       createdAt: startTime,
@@ -2003,38 +2527,29 @@ function buildUserHistoryData(): {
   return { sessions, sets };
 }
 
-const builtHistory = buildUserHistoryData();
+const builtSampleHistory = buildUserHistoryData();
 
-export const INITIAL_SESSIONS: WorkoutSession[] = builtHistory.sessions;
-export const INITIAL_SETS: WorkoutSet[] = builtHistory.sets;
+// 供用户手动一键导入的 39 场示例锻炼记录
+export const SAMPLE_WORKOUT_SESSIONS: WorkoutSession[] =
+  builtSampleHistory.sessions;
+export const SAMPLE_WORKOUT_SETS: WorkoutSet[] = builtSampleHistory.sets;
 
-export const INITIAL_BODY_METRICS: BodyMetric[] = [
-  {
-    id: 'bm_20260720',
-    date: '2026-07-20',
-    weightKg: 74.5,
-    bodyFatRate: 17.2,
-    createdAt: new Date('2026-07-20T08:30:00+08:00').getTime(),
-  },
-  {
-    id: 'bm_20260815',
-    date: '2026-08-15',
-    weightKg: 73.8,
-    bodyFatRate: 16.4,
-    createdAt: new Date('2026-08-15T08:30:00+08:00').getTime(),
-  },
-  {
-    id: 'bm_20260915',
-    date: '2026-09-15',
-    weightKg: 73.2,
-    bodyFatRate: 15.6,
-    createdAt: new Date('2026-09-15T08:30:00+08:00').getTime(),
-  },
-  {
-    id: 'bm_20261022',
-    date: '2026-10-22',
-    weightKg: 72.8,
-    bodyFatRate: 14.9,
-    createdAt: new Date('2026-10-22T08:30:00+08:00').getTime(),
-  },
-];
+export function getSampleBackupPayload(): BackupPayload {
+  return {
+    version: 1,
+    exportedAt: new Date('2026-10-30T21:00:00+08:00').getTime(),
+    appName: 'FitnessTracker',
+    data: {
+      exercises: INITIAL_EXERCISES,
+      routines: INITIAL_ROUTINES,
+      workoutSessions: SAMPLE_WORKOUT_SESSIONS,
+      workoutSets: SAMPLE_WORKOUT_SETS,
+      bodyMetrics: [],
+    },
+  };
+}
+
+// 默认初始加载数据：除训练计划（及动作字典）外，默认不再预置训练记录与体重数据
+export const INITIAL_SESSIONS: WorkoutSession[] = [];
+export const INITIAL_SETS: WorkoutSet[] = [];
+export const INITIAL_BODY_METRICS: BodyMetric[] = [];

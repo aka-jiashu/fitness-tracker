@@ -661,7 +661,7 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
                 {EQUIPMENT_LABELS[exercise.equipment]}
               </span>
             </div>
-            {lastPerf && lastPerf.sets.length > 0 && (
+            {lastPerf && lastPerf.sets.length > 0 ? (
               <p className="text-[11px] text-slate-400 mt-0.5">
                 上次:{' '}
                 {lastPerf.sets
@@ -670,6 +670,19 @@ export const ActiveWorkoutTab: React.FC<ActiveWorkoutTabProps> = ({
                   .join(' / ')}
                 {lastPerf.lastNote ? ` · 📝 ${lastPerf.lastNote}` : ''}
               </p>
+            ) : (
+              associatedRoutine?.exercises.find(
+                (e) => e.exerciseId === exercise.id
+              )?.notes && (
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  计划配重:{' '}
+                  {
+                    associatedRoutine.exercises.find(
+                      (e) => e.exerciseId === exercise.id
+                    )?.notes
+                  }
+                </p>
+              )
             )}
           </div>
 

@@ -21,11 +21,13 @@ import {
   Scale,
   Calendar,
   Trophy,
+  Database,
 } from 'lucide-react';
 import {
   db,
   exportFullBackupJson,
   importBackupJson,
+  importSampleWorkoutData,
   resetToFactoryDefaults,
 } from '../db/database';
 import { BackupPayload, BodyMetric, Exercise, WorkoutSet } from '../types/fitness';
@@ -291,12 +293,30 @@ export const AnalyticsTab: React.FC = () => {
     }
   };
 
+  const handleImportSampleData = async () => {
+    if (
+      sessions.length > 0 &&
+      !window.confirm('是否将内置的 39 场示例锻炼记录导入合并到当前数据中？')
+    ) {
+      return;
+    }
+    const res = await importSampleWorkoutData();
+    setStatusMessage(
+      `成功导入 ${res.importedSessions} 场示例训练记录（共 ${res.importedSets} 组）`
+    );
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
   const handleResetAll = async () => {
-    if (!window.confirm('确定恢复预置的 35 场真实训练日志与 5 套专属计划吗？')) {
+    if (
+      !window.confirm(
+        '确定重置为初始状态吗？这会清空所有训练记录与体重数据，仅保留 4 套分部位训练计划。'
+      )
+    ) {
       return;
     }
     await resetToFactoryDefaults();
-    setStatusMessage('已恢复完整预置训练日志与计划');
+    setStatusMessage('已清空记录并恢复 4 套初始部位训练计划');
     setTimeout(() => setStatusMessage(null), 2500);
   };
 
@@ -623,9 +643,36 @@ export const AnalyticsTab: React.FC = () => {
 
       {/* Workout History List */}
       <div className="space-y-2.5">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-          历史训练日志 ({sessions.length} 场)
-        </h2>
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            历史训练日志 ({sessions.length} 场)
+          </h2>
+          {sessions.length === 0 && (
+            <button
+              type="button"
+              onClick={handleImportSampleData}
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer"
+            >
+              + 导入 39 场示例数据
+            </button>
+          )}
+        </div>
+
+        {sessions.length === 0 && (
+          <div className="rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 p-6 text-center space-y-3">
+            <p className="text-xs text-slate-400">
+              当前暂无训练记录。您可以直接去「训练」或「计划」页开始打卡，或一键导入完整的 39 场示例锻炼记录查看容量趋势与历史数据。
+            </p>
+            <button
+              type="button"
+              onClick={handleImportSampleData}
+              className="touch-target px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-xs font-extrabold text-emerald-300 inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>一键导入示例数据 (39 场记录)</span>
+            </button>
+          </div>
+        )}
 
         {sessions.map((session) => {
           const isExpanded = expandedSessionId === session.id;
@@ -754,7 +801,16 @@ export const AnalyticsTab: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleImportSampleData}
+            className="touch-target px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold text-emerald-300 flex items-center gap-1.5 cursor-pointer"
+            title="导入内置的 39 场最新修正锻炼记录"
+          >
+            <Database className="w-3.5 h-3.5 text-emerald-400" />
+            <span>导入示例数据</span>
+          </button>
           <button
             type="button"
             onClick={handleExportBackup}
@@ -769,7 +825,7 @@ export const AnalyticsTab: React.FC = () => {
             className="touch-target px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5 text-cyan-400" />
-            <span>导入</span>
+            <span>导入 JSON</span>
           </button>
           <input
             ref={fileInputRef}
@@ -782,7 +838,7 @@ export const AnalyticsTab: React.FC = () => {
             type="button"
             onClick={handleResetAll}
             className="touch-target px-3 py-2 rounded-xl bg-slate-800/70 hover:bg-rose-950/50 text-xs font-bold text-slate-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
-            title="恢复预置真实日志与计划"
+            title="清空训练记录与体重数据，仅保留初始训练计划"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>重置</span>

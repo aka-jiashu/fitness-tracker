@@ -12,9 +12,8 @@ import {
 import {
   INITIAL_EXERCISES,
   INITIAL_ROUTINES,
-  INITIAL_SESSIONS,
-  INITIAL_SETS,
-  INITIAL_BODY_METRICS,
+  SAMPLE_WORKOUT_SESSIONS,
+  SAMPLE_WORKOUT_SETS,
 } from './seedData';
 import { convertWeight, estimate1RMKg } from '../utils/fitnessUtils';
 
@@ -39,30 +38,53 @@ export class FitnessDatabase extends Dexie {
 
 export const db = new FitnessDatabase();
 
-const SEED_VERSION_KEY = 'fitness_tracker_seed_v2_real_logs';
+const SEED_VERSION_KEY = 'fitness_tracker_seed_v3_clean_default';
 let seedPromise: Promise<void> | null = null;
 
 /**
- * 初始化预置动作库、专属分化模板及 35 场真实训练日志（支持从旧版 Demo 数据平滑升级）
+ * 初始化预置动作字典与 4 套分部位训练计划（默认不再加载历史训练记录与体重数据）
  */
 export async function ensureDatabaseSeeded(): Promise<void> {
   if (seedPromise) return seedPromise;
   seedPromise = (async () => {
-    const isV2Seeded =
+    const isV3Seeded =
       typeof localStorage !== 'undefined' &&
       localStorage.getItem(SEED_VERSION_KEY) === 'true';
     const count = await db.exercises.count();
 
-    if (count === 0 || !isV2Seeded) {
+    if (count === 0 || !isV3Seeded) {
       await db.transaction(
         'rw',
-        [db.exercises, db.routines, db.workoutSessions, db.workoutSets, db.bodyMetrics],
+        [
+          db.exercises,
+          db.routines,
+          db.workoutSessions,
+          db.workoutSets,
+          db.bodyMetrics,
+        ],
         async () => {
-          // 清理旧版虚拟 Demo 会话与内置旧模板
-          const oldDemoSessionIds = ['session_demo_1', 'session_demo_2', 'session_demo_3', 'session_demo_4'];
-          await db.workoutSessions.bulkDelete(oldDemoSessionIds);
-          await db.workoutSets.where('sessionId').anyOf(oldDemoSessionIds).delete();
+          // 清理旧版默认预置的会话、组数据与虚拟体重记录
+          const oldSeededSessions = await db.workoutSessions
+            .filter(
+              (s) =>
+                s.id.startsWith('ws_real_') || s.id.startsWith('session_demo_')
+            )
+            .toArray();
+          if (oldSeededSessions.length > 0) {
+            const oldSessionIds = oldSeededSessions.map((s) => s.id);
+            await db.workoutSessions.bulkDelete(oldSessionIds);
+            await db.workoutSets.where('sessionId').anyOf(oldSessionIds).delete();
+          }
 
+          const oldSeededMetricIds = [
+            'bm_20260720',
+            'bm_20260815',
+            'bm_20260915',
+            'bm_20261022',
+          ];
+          await db.bodyMetrics.bulkDelete(oldSeededMetricIds);
+
+          // 清理旧版内置计划并写入最新 4 套分部位训练计划与动作字典
           const oldBuiltinRoutineIds = [
             'routine_ppl_push',
             'routine_ppl_pull',
@@ -70,19 +92,12 @@ export async function ensureDatabaseSeeded(): Promise<void> {
             'routine_ul_upper',
             'routine_ul_lower',
             'routine_fullbody',
+            'routine_user_incline_chest',
           ];
           await db.routines.bulkDelete(oldBuiltinRoutineIds);
 
-          // 写入最新真实动作库、5 套专属分化计划、35 场真实训练记录
           await db.exercises.bulkPut(INITIAL_EXERCISES);
           await db.routines.bulkPut(INITIAL_ROUTINES);
-          await db.workoutSessions.bulkPut(INITIAL_SESSIONS);
-          await db.workoutSets.bulkPut(INITIAL_SETS);
-
-          const bmCount = await db.bodyMetrics.count();
-          if (bmCount === 0) {
-            await db.bodyMetrics.bulkPut(INITIAL_BODY_METRICS);
-          }
         }
       );
 
@@ -161,11 +176,13 @@ export async function getLastPerformanceForExercise(
 }
 
 /**
- * 按指定计划模板启动新训练会话（自动继承各动作上次每组的真实重量）
+ * 按指定计划模板启动新训练会话（优先继承上次真实重量，若无历史记录则使用计划内置阶梯重量预设）
  */
 export async function startWorkoutFromRoutine(routine: Routine): Promise<string> {
   // 先清理任何未完成的旧会话
-  const activeSessions = await db.workoutSessions.filter((s) => !s.isFinished).toArray();
+  const activeSessions = await db.workoutSessions
+    .filter((s) => !s.isFinished)
+    .toArray();
   for (const old of activeSessions) {
     await db.workoutSets.where('sessionId').equals(old.id).delete();
     await db.workoutSessions.delete(old.id);
@@ -187,14 +204,29 @@ export async function startWorkoutFromRoutine(routine: Routine): Promise<string>
     for (let i = 1; i <= item.targetSets; i++) {
       const prevSet =
         lastPerf.sets[i - 1] || lastPerf.sets[lastPerf.sets.length - 1];
+      const presetSet =
+        item.presetSets?.[i - 1] ||
+        item.presetSets?.[item.presetSets.length - 1];
+
       const defaultWeight = prevSet
         ? convertWeight(prevSet.weight, prevSet.unit, unit)
+        : presetSet !== undefined
+        ? convertWeight(presetSet.weight, item.targetUnit || unit, unit)
         : ex?.equipment === 'bodyweight' || ex?.equipment === 'band'
         ? 0
         : unit === 'lb'
         ? 25
         : 20;
-      const defaultReps = item.targetReps || (prevSet ? prevSet.reps : 12);
+
+      const defaultReps = prevSet
+        ? item.targetReps || prevSet.reps
+        : presetSet?.reps || item.targetReps || 12;
+
+      const defaultSetType = prevSet
+        ? prevSet.setType === 'warmup' && i <= 2
+          ? 'warmup'
+          : 'normal'
+        : presetSet?.setType || 'normal';
 
       newSets.push({
         id: `set_${sessionId}_${item.exerciseId}_${i}_${Math.random()
@@ -203,7 +235,7 @@ export async function startWorkoutFromRoutine(routine: Routine): Promise<string>
         sessionId,
         exerciseId: item.exerciseId,
         setOrder: i,
-        setType: prevSet?.setType === 'warmup' && i <= 2 ? 'warmup' : 'normal',
+        setType: defaultSetType,
         weight: defaultWeight,
         unit,
         reps: defaultReps,
@@ -250,7 +282,8 @@ export function hasRoutineDiff(
 
     const exSets = sets.filter((s) => s.exerciseId === exId && !s.isSkipped);
     const completedSets = exSets.filter((s) => s.isCompleted);
-    const effectiveCount = completedSets.length > 0 ? completedSets.length : exSets.length;
+    const effectiveCount =
+      completedSets.length > 0 ? completedSets.length : exSets.length;
     if (effectiveCount > 0 && effectiveCount !== rEx.targetSets) return true;
   }
 
@@ -258,7 +291,7 @@ export function hasRoutineDiff(
 }
 
 /**
- * 将本次训练会话的动作顺序与组数同步回原计划模板
+ * 将本次训练会话的动作顺序、组数与各组重量预设同步回原计划模板
  */
 export async function syncSessionToRoutine(
   session: WorkoutSession,
@@ -287,6 +320,11 @@ export async function syncSessionToRoutine(
       targetUnit: refSet.unit || prev?.targetUnit || 'lb',
       restSeconds: prev?.restSeconds || 90,
       notes: session.exerciseNotes?.[exId] || prev?.notes,
+      presetSets: activeSets.map((s) => ({
+        weight: s.weight,
+        reps: s.reps,
+        setType: s.setType,
+      })),
     });
   }
 
@@ -299,13 +337,14 @@ export async function syncSessionToRoutine(
  * 导出全量 JSON 备份快照
  */
 export async function exportFullBackupJson(): Promise<BackupPayload> {
-  const [exercises, routines, workoutSessions, workoutSets, bodyMetrics] = await Promise.all([
-    db.exercises.toArray(),
-    db.routines.toArray(),
-    db.workoutSessions.toArray(),
-    db.workoutSets.toArray(),
-    db.bodyMetrics.toArray(),
-  ]);
+  const [exercises, routines, workoutSessions, workoutSets, bodyMetrics] =
+    await Promise.all([
+      db.exercises.toArray(),
+      db.routines.toArray(),
+      db.workoutSessions.toArray(),
+      db.workoutSets.toArray(),
+      db.bodyMetrics.toArray(),
+    ]);
 
   return {
     version: 1,
@@ -327,16 +366,32 @@ export async function exportFullBackupJson(): Promise<BackupPayload> {
 export async function importBackupJson(
   payload: BackupPayload,
   mode: 'merge' | 'replace' = 'merge'
-): Promise<{ importedExercises: number; importedSessions: number; importedMetrics: number }> {
+): Promise<{
+  importedExercises: number;
+  importedSessions: number;
+  importedMetrics: number;
+}> {
   if (!payload || payload.appName !== 'FitnessTracker' || !payload.data) {
     throw new Error('无效的备份文件格式：缺少 FitnessTracker 标识或数据体');
   }
 
-  const { exercises = [], routines = [], workoutSessions = [], workoutSets = [], bodyMetrics = [] } = payload.data;
+  const {
+    exercises = [],
+    routines = [],
+    workoutSessions = [],
+    workoutSets = [],
+    bodyMetrics = [],
+  } = payload.data;
 
   await db.transaction(
     'rw',
-    [db.exercises, db.routines, db.workoutSessions, db.workoutSets, db.bodyMetrics],
+    [
+      db.exercises,
+      db.routines,
+      db.workoutSessions,
+      db.workoutSets,
+      db.bodyMetrics,
+    ],
     async () => {
       if (mode === 'replace') {
         await Promise.all([
@@ -349,7 +404,8 @@ export async function importBackupJson(
       }
       if (exercises.length > 0) await db.exercises.bulkPut(exercises);
       if (routines.length > 0) await db.routines.bulkPut(routines);
-      if (workoutSessions.length > 0) await db.workoutSessions.bulkPut(workoutSessions);
+      if (workoutSessions.length > 0)
+        await db.workoutSessions.bulkPut(workoutSessions);
       if (workoutSets.length > 0) await db.workoutSets.bulkPut(workoutSets);
       if (bodyMetrics.length > 0) await db.bodyMetrics.bulkPut(bodyMetrics);
     }
@@ -363,12 +419,42 @@ export async function importBackupJson(
 }
 
 /**
- * 重置为出厂预置数据（恢复 35 场真实训练日志与 5 套专属计划）
+ * 一键导入内置的 39 场示例锻炼记录
+ */
+export async function importSampleWorkoutData(): Promise<{
+  importedSessions: number;
+  importedSets: number;
+}> {
+  await db.transaction(
+    'rw',
+    [db.exercises, db.routines, db.workoutSessions, db.workoutSets],
+    async () => {
+      await db.exercises.bulkPut(INITIAL_EXERCISES);
+      await db.routines.bulkPut(INITIAL_ROUTINES);
+      await db.workoutSessions.bulkPut(SAMPLE_WORKOUT_SESSIONS);
+      await db.workoutSets.bulkPut(SAMPLE_WORKOUT_SETS);
+    }
+  );
+
+  return {
+    importedSessions: SAMPLE_WORKOUT_SESSIONS.length,
+    importedSets: SAMPLE_WORKOUT_SETS.length,
+  };
+}
+
+/**
+ * 重置为出厂初始状态（仅保留 4 套分部位训练计划与基础动作字典，清空所有训练记录与体重数据）
  */
 export async function resetToFactoryDefaults(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.exercises, db.routines, db.workoutSessions, db.workoutSets, db.bodyMetrics],
+    [
+      db.exercises,
+      db.routines,
+      db.workoutSessions,
+      db.workoutSets,
+      db.bodyMetrics,
+    ],
     async () => {
       await Promise.all([
         db.exercises.clear(),
@@ -379,9 +465,6 @@ export async function resetToFactoryDefaults(): Promise<void> {
       ]);
       await db.exercises.bulkPut(INITIAL_EXERCISES);
       await db.routines.bulkPut(INITIAL_ROUTINES);
-      await db.workoutSessions.bulkPut(INITIAL_SESSIONS);
-      await db.workoutSets.bulkPut(INITIAL_SETS);
-      await db.bodyMetrics.bulkPut(INITIAL_BODY_METRICS);
     }
   );
   if (typeof localStorage !== 'undefined') {
